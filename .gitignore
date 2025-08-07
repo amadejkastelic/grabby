@@ -1,6 +1,6 @@
-target/
-.direnv/
 .claude/
 .code/
-downloads/
+.direnv/
 .pre-commit-config.yaml
+downloads/
+target/
