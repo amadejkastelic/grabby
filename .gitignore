@@ -3,3 +3,4 @@ target/
 .claude/
 .code/
 downloads/
+.pre-commit-config.yaml
