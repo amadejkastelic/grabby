@@ -3,4 +3,5 @@
 .direnv/
 .pre-commit-config.yaml
 downloads/
+result
 target/

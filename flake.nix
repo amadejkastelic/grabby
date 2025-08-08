@@ -43,7 +43,14 @@
         };
       in
       {
-        packages.default = grabby;
+        packages = {
+          default = grabby;
+
+          docker = import ./nix/docker.nix {
+            inherit pkgs;
+            grabby = grabby;
+          };
+        };
 
         devShells.default = pkgs.callPackage ./nix/shell.nix {
           pre-commit-check = pre-commit-check;
