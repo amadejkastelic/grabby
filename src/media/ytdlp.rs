@@ -17,26 +17,30 @@ impl YtDlpDownloader {
     async fn extract_metadata(&self, url: &str) -> Result<MediaMetadata> {
         debug!("Extracting metadata with yt-dlp for: {}", url);
 
-        let output = tokio::process::Command::new("yt-dlp")
-            .arg("--dump-json")
-            .arg("--no-download")
-            .arg("--no-warnings")
-            .arg(url)
-            .output()
-            .await
-            .context("Failed to execute yt-dlp - make sure it's installed")?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tokio::process::Command::new("yt-dlp")
+                .arg("--dump-json")
+                .arg("--no-download")
+                .arg("--no-warnings")
+                .arg(url)
+                .output(),
+        )
+        .await
+        .context("Media metadata extraction timed out")?
+        .context("Failed to extract media metadata")?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!(
-                "yt-dlp metadata extraction failed: {}",
+                "Media metadata extraction failed: {}",
                 error
             ));
         }
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let json: Value =
-            serde_json::from_str(&json_str).context("Failed to parse yt-dlp JSON output")?;
+            serde_json::from_str(&json_str).context("Failed to parse media metadata")?;
 
         debug!("yt-dlp JSON output: {}", json_str);
 
@@ -45,6 +49,7 @@ impl YtDlpDownloader {
                 .as_str()
                 .unwrap_or("Unknown Title")
                 .to_string(),
+            id: json["id"].as_str().unwrap_or("video").to_string(),
             thumbnail: json["thumbnail"].as_str().map(|s| s.to_string()),
             duration: json["duration"].as_f64().map(|d| d as u64),
             author: json["uploader"].as_str().map(|s| s.to_string()),
@@ -57,19 +62,23 @@ impl YtDlpDownloader {
         url: &str,
         metadata: &MediaMetadata,
     ) -> Result<Vec<MediaFile>> {
-        info!("Downloading media with yt-dlp: {}", metadata.title);
+        info!("Downloading media with yt-dlp: {}", metadata.id);
 
         // Use yt-dlp to output to stdout
-        let output = tokio::process::Command::new("yt-dlp")
-            .arg("--output")
-            .arg("-") // Output to stdout
-            .arg("--format")
-            .arg("best[height<=720]/bestvideo[height<=720]+bestaudio/best[filesize<25M]/bestvideo+bestaudio/best")
-            .arg("--no-warnings")
-            .arg(url)
-            .output()
-            .await
-            .context("Failed to execute yt-dlp for media download")?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(120), // 2 minutes for download
+            tokio::process::Command::new("yt-dlp")
+                .arg("--output")
+                .arg("-") // Output to stdout
+                .arg("--format")
+                .arg("best[height<=720]/bestvideo[height<=720]+bestaudio/best[filesize<25M]/bestvideo+bestaudio/best")
+                .arg("--no-warnings")
+                .arg(url)
+                .output()
+        )
+        .await
+        .context("Media download timed out")?
+        .context("Failed to download media")?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
@@ -78,35 +87,36 @@ impl YtDlpDownloader {
             if error.contains("Requested format is not available") {
                 warn!("Format not available, retrying without format specification...");
 
-                let retry_output = tokio::process::Command::new("yt-dlp")
-                    .arg("--output")
-                    .arg("-")
-                    .arg("--no-warnings")
-                    .arg(url)
-                    .output()
-                    .await
-                    .context("Failed to execute yt-dlp retry")?;
+                let retry_output = tokio::time::timeout(
+                    std::time::Duration::from_secs(120), // 2 minutes for retry
+                    tokio::process::Command::new("yt-dlp")
+                        .arg("--output")
+                        .arg("-")
+                        .arg("--no-warnings")
+                        .arg(url)
+                        .output(),
+                )
+                .await
+                .context("Media download retry timed out")?
+                .context("Failed to retry media download")?;
 
                 if !retry_output.status.success() {
                     let retry_error = String::from_utf8_lossy(&retry_output.stderr);
-                    return Err(anyhow::anyhow!(
-                        "yt-dlp download failed even without format specification: {}",
-                        retry_error
-                    ));
+                    return Err(anyhow::anyhow!("Media download failed: {}", retry_error));
                 }
 
                 return Ok(vec![MediaFile {
-                    filename: "video.mp4".to_string(),
+                    filename: format!("{}.mp4", metadata.id),
                     data: retry_output.stdout,
                     content_type: Some("video/mp4".to_string()),
                 }]);
             } else {
-                return Err(anyhow::anyhow!("yt-dlp download failed: {}", error));
+                return Err(anyhow::anyhow!("Media download failed: {}", error));
             }
         }
 
         Ok(vec![MediaFile {
-            filename: "video.mp4".to_string(),
+            filename: format!("{}.mp4", metadata.id),
             data: output.stdout,
             content_type: Some("video/mp4".to_string()),
         }])

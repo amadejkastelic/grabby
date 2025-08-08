@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 pub struct MediaMetadata {
     pub title: String,
+    pub id: String,
     pub thumbnail: Option<String>,
     pub duration: Option<u64>,
     pub author: Option<String>,

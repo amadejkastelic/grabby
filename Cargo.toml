@@ -19,7 +19,3 @@ anyhow = "1.0.98"
 url = "2.5.4"
 twilight-util = { version = "0.16.0", features = ["builder"] }
 async-trait = "0.1.88"
-
-[dependencies.uuid]
-version = "1.0"
-features = ["v4"]

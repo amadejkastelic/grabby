@@ -44,15 +44,15 @@ impl MediaDownloader {
                 }
                 Err(e) => {
                     warn!("{} failed: {}", downloader.name(), e);
-                    errors.push(format!("{}: {}", downloader.name(), e));
+                    errors.push(format!("{e}"));
                 }
             }
         }
 
         // If all downloaders failed
         Err(anyhow::anyhow!(
-            "All downloaders failed. Errors: {}",
-            errors.join(", ")
+            "Media download failed: {}",
+            errors.join(". ")
         ))
     }
 

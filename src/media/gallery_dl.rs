@@ -17,17 +17,21 @@ impl GalleryDlDownloader {
     async fn extract_metadata_and_urls(&self, url: &str) -> Result<(MediaMetadata, Vec<String>)> {
         debug!("Extracting metadata with gallery-dl for: {}", url);
 
-        let output = tokio::process::Command::new("gallery-dl")
-            .arg("--dump-json")
-            .arg(url)
-            .output()
-            .await
-            .context("Failed to execute gallery-dl - make sure it's installed")?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tokio::process::Command::new("gallery-dl")
+                .arg("--dump-json")
+                .arg(url)
+                .output(),
+        )
+        .await
+        .context("Media metadata extraction timed out")?
+        .context("Failed to extract media metadata")?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!(
-                "gallery-dl metadata extraction failed: {}",
+                "Media metadata extraction failed: {}",
                 error
             ));
         }
@@ -37,15 +41,15 @@ impl GalleryDlDownloader {
 
         // gallery-dl outputs a JSON array
         let json_array: Value =
-            serde_json::from_str(&json_str).context("Failed to parse gallery-dl JSON output")?;
+            serde_json::from_str(&json_str).context("Failed to parse media metadata")?;
 
         // Check if it's an empty array (no media found)
         let array = json_array
             .as_array()
-            .ok_or_else(|| anyhow::anyhow!("gallery-dl output is not a JSON array"))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid media metadata format"))?;
 
         if array.is_empty() {
-            return Err(anyhow::anyhow!("No media found by gallery-dl for this URL"));
+            return Err(anyhow::anyhow!("No media found for this URL"));
         }
 
         // Gallery-dl format: [[type, metadata], [type, url, metadata], ...]
@@ -65,20 +69,27 @@ impl GalleryDlDownloader {
                             if metadata.is_none() {
                                 debug!("gallery-dl media item metadata: {}", meta);
                                 metadata = Some(MediaMetadata {
-                                    title: meta["content"]
+                                    title: meta["title"]
                                         .as_str()
                                         .or(meta["filename"].as_str())
-                                        .or(meta["title"].as_str())
+                                        .or(meta["content"].as_str())
                                         .unwrap_or("Unknown Media")
+                                        .to_string(),
+                                    id: meta["id"]
+                                        .as_str()
+                                        .or(meta["filename"].as_str())
+                                        .unwrap_or("unknown")
                                         .to_string(),
                                     thumbnail: None, // We'll have the actual images
                                     duration: None,  // Images don't have duration
-                                    author: meta["author"]["name"]
+                                    author: meta["author"]
                                         .as_str()
-                                        .or(meta["author"]["nick"].as_str())
                                         .or(meta["uploader"].as_str())
                                         .map(|s| s.to_string()),
-                                    likes: meta["favorite_count"].as_u64(),
+                                    likes: meta["ups"]
+                                        .as_u64()
+                                        .or(meta["score"].as_u64())
+                                        .or(meta["favorite_count"].as_u64()),
                                 });
                             }
                         }
@@ -87,22 +98,34 @@ impl GalleryDlDownloader {
             }
         }
 
-        let metadata = metadata
-            .ok_or_else(|| anyhow::anyhow!("No media metadata found in gallery-dl output"))?;
+        let metadata = metadata.ok_or_else(|| anyhow::anyhow!("No media metadata found"))?;
 
         if urls.is_empty() {
-            return Err(anyhow::anyhow!("No media URLs found in gallery-dl output"));
+            return Err(anyhow::anyhow!("No media URLs found"));
         }
 
         debug!("Found {} media URLs", urls.len());
         Ok((metadata, urls))
     }
 
-    async fn download_url_to_memory(&self, url: &str, index: usize) -> Result<MediaFile> {
+    async fn download_url_to_memory(
+        &self,
+        url: &str,
+        index: usize,
+        metadata: &MediaMetadata,
+    ) -> Result<MediaFile> {
         debug!("Downloading URL to memory: {}", url);
 
+        // Create client with timeout
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .context("Failed to create HTTP client")?;
+
         // Download the URL content
-        let response = reqwest::get(url)
+        let response = client
+            .get(url)
+            .send()
             .await
             .context("Failed to fetch media URL")?;
 
@@ -151,10 +174,11 @@ impl GalleryDlDownloader {
             "bin"
         };
 
+        // Use metadata ID for filename, fallback to index
         let filename = if index == 0 {
-            format!("image.{extension}")
+            format!("{}.{extension}", metadata.id)
         } else {
-            format!("image_{}.{extension}", index + 1)
+            format!("{}_{}.{extension}", metadata.id, index + 1)
         };
 
         Ok(MediaFile {
@@ -172,18 +196,23 @@ impl Downloader for GalleryDlDownloader {
     }
 
     async fn download(&self, url: &str) -> Result<MediaInfo> {
+        info!("Starting gallery-dl download for: {}", url);
+        debug!("Extracting metadata and URLs...");
         let (metadata, media_urls) = self.extract_metadata_and_urls(url).await?;
 
         info!(
             "Downloading {} media files with gallery-dl: {}",
             media_urls.len(),
-            metadata.title
+            metadata.id
         );
 
         // Download all media URLs to memory
         let mut files = Vec::new();
         for (index, media_url) in media_urls.iter().enumerate() {
-            match self.download_url_to_memory(media_url, index).await {
+            match self
+                .download_url_to_memory(media_url, index, &metadata)
+                .await
+            {
                 Ok(file) => files.push(file),
                 Err(e) => warn!("Failed to download {}: {}", media_url, e),
             }

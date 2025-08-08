@@ -10,4 +10,16 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = ../Cargo.lock;
   src = pkgs.lib.cleanSource ../.;
   doCheck = true;
+
+  nativeBuildInputs = [ pkgs.makeWrapper ];
+
+  buildInputs = with pkgs; [
+    yt-dlp
+    gallery-dl
+  ];
+
+  postFixup = ''
+    wrapProgram $out/bin/grabby \
+      --prefix PATH : "${pkgs.yt-dlp}/bin:${pkgs.gallery-dl}/bin:$out/bin"
+  '';
 }

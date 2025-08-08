@@ -1,11 +1,8 @@
 use crate::{config::ConfigManager, media::MediaDownloader};
 use anyhow::{Context, Result};
-use std::{
-    env,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::env;
 use tokio::join;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use twilight_cache_inmemory::InMemoryCache;
 use twilight_gateway::{Event, Intents, Shard, ShardId, StreamExt};
 use twilight_http::request::channel::reaction::RequestReactionType;
@@ -387,10 +384,21 @@ impl DiscordBot {
         // Create attachments from in-memory files
         let mut attachments = Vec::new();
         let mut oversized_files = Vec::new();
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let mut attachment_id = 1u64;
 
         for file in &media_info.files {
             let file_size = file.data.len() as u64;
+
+            debug!(
+                "Processing file: {} (size: {} bytes)",
+                file.filename, file_size
+            );
+
+            // Skip empty files
+            if file_size == 0 {
+                warn!("Skipping empty file: {}", file.filename);
+                continue;
+            }
 
             // Discord has a 25MB file size limit for most servers
             if file_size > 25_000_000 {
@@ -404,7 +412,8 @@ impl DiscordBot {
                 file.filename.clone()
             };
 
-            let attachment = Attachment::from_bytes(file_name, file.data.clone(), timestamp);
+            let attachment = Attachment::from_bytes(file_name, file.data.clone(), attachment_id);
+            attachment_id += 1;
 
             attachments.push(attachment);
         }
@@ -427,16 +436,35 @@ impl DiscordBot {
             return Ok(());
         }
 
-        // Build message content
+        // Build message content with metadata
         let mut content = if let Some(user_id) = user_id {
             format!("🎬 {} (shared by <@{}>)", media_info.url, user_id)
         } else {
             format!("🎬 {}", media_info.url)
         };
 
+        // Add title
+        if !media_info.metadata.title.is_empty()
+            && media_info.metadata.title != "Unknown Title"
+            && media_info.metadata.title != "Unknown Media"
+        {
+            content.push_str(&format!("\n**{}**", media_info.metadata.title));
+        }
+
+        // Add author if available
+        if let Some(author) = &media_info.metadata.author {
+            content.push_str(&format!("\n👤 {author}"));
+        }
+
+        // Add likes if available
+        if let Some(likes) = media_info.metadata.likes {
+            content.push_str(&format!("\n❤️ {likes} likes"));
+        }
+
+        // Add user message if provided
         if let Some(message_content) = message {
             if !message_content.is_empty() {
-                content.push_str(&format!("\n{message_content}"));
+                content.push_str(&format!("\n\n{message_content}"));
             }
         }
 
@@ -450,7 +478,13 @@ impl DiscordBot {
             content.push_str(&format!("\n⚠️ Skipped oversized files: {oversized_names}"));
         }
 
-        // Send message with attachments
+        // Send message with multiple attachments
+        debug!("Sending message with {} attachments", attachments.len());
+        debug!(
+            "Attachment filenames: {:?}",
+            attachments.iter().map(|a| &a.filename).collect::<Vec<_>>()
+        );
+
         let message = self
             .http
             .create_message(*channel_id)
