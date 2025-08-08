@@ -46,7 +46,8 @@
         packages.default = grabby;
 
         devShells.default = pkgs.callPackage ./nix/shell.nix {
-          inherit pre-commit-check pkgs;
+          pre-commit-check = pre-commit-check;
+          pkgs = pkgs;
         };
 
         checks = {

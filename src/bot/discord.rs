@@ -4,9 +4,11 @@ use std::{
     env,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::join;
 use tracing::{error, info, warn};
 use twilight_cache_inmemory::InMemoryCache;
 use twilight_gateway::{Event, Intents, Shard, ShardId, StreamExt};
+use twilight_http::request::channel::reaction::RequestReactionType;
 use twilight_http::Client as HttpClient;
 use twilight_model::{
     application::{
@@ -15,15 +17,15 @@ use twilight_model::{
             application_command::CommandData, Interaction, InteractionData, InteractionType,
         },
     },
-    channel::message::MessageFlags,
-    gateway::payload::incoming::MessageCreate,
+    channel::message::{EmojiReactionType, MessageFlags},
+    gateway::payload::incoming::{MessageCreate, ReactionAdd},
     http::{
         attachment::Attachment,
         interaction::{InteractionResponse, InteractionResponseType},
     },
     id::{marker::ChannelMarker, Id},
 };
-use twilight_util::builder::command::{CommandBuilder, StringBuilder};
+use twilight_util::builder::command::{BooleanBuilder, CommandBuilder, StringBuilder};
 
 pub struct DiscordBot {
     http: HttpClient,
@@ -39,7 +41,8 @@ impl DiscordBot {
         let http = HttpClient::new(token.clone());
         let cache = InMemoryCache::new();
 
-        let intents = Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT;
+        let intents =
+            Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT | Intents::GUILD_MESSAGE_REACTIONS;
         let shard = Shard::new(ShardId::ONE, token, intents);
 
         let media_downloader =
@@ -83,6 +86,8 @@ impl DiscordBot {
             CommandType::ChatInput,
         )
         .option(StringBuilder::new("url", "URL to download and embed").required(true))
+        .option(StringBuilder::new("message", "Message to send with the embed").required(false))
+        .option(BooleanBuilder::new("spoiler", "Mark the embed as a spoiler").required(false))
         .build();
 
         // Create the global command using the interaction client
@@ -126,6 +131,9 @@ impl DiscordBot {
                 Event::InteractionCreate(interaction) => {
                     self.handle_interaction(&interaction).await?;
                 }
+                Event::ReactionAdd(reaction) => {
+                    self.handle_reaction_add(&reaction).await?;
+                }
                 Event::Ready(_) => {
                     info!("Discord bot is ready!");
                 }
@@ -146,14 +154,20 @@ impl DiscordBot {
                 .config
                 .is_auto_embed_channel(&guild_id.to_string(), &msg.channel_id.to_string())
             {
-                // Extract URLs from message content and process them
+                // Extract URLs from message content and process the first supported one
                 for url in self.extract_urls(&msg.content) {
                     if self.media_downloader.is_supported_url(&url) {
                         match self.media_downloader.download(&url).await {
                             Ok(media_info) => {
                                 info!("Downloaded media: {}", media_info.metadata.title);
                                 if let Err(e) = self
-                                    .send_media_to_channel(&msg.channel_id, &media_info)
+                                    .send_media_to_channel(
+                                        &msg.channel_id,
+                                        Some(msg.author.id),
+                                        &media_info,
+                                        Some("".to_string()),
+                                        false,
+                                    )
                                     .await
                                 {
                                     error!("Failed to send media to channel: {}", e);
@@ -163,11 +177,59 @@ impl DiscordBot {
                                 error!("Failed to download media from {}: {}", url, e);
                             }
                         }
+                        break; // Only process the first supported URL
                     }
                 }
             }
         }
 
+        Ok(())
+    }
+
+    async fn handle_reaction_add(&self, reaction: &ReactionAdd) -> Result<()> {
+        // Only handle X emoji reactions
+        match &reaction.emoji {
+            EmojiReactionType::Unicode { name } if name == "❌" => {
+                // Check if the reaction was added by the message author or a server admin
+                if let Some(guild_id) = reaction.guild_id {
+                    // Get the message to extract the original author
+                    if let Ok(message) = self
+                        .http
+                        .message(reaction.channel_id, reaction.message_id)
+                        .await
+                    {
+                        if let Ok(message_model) = message.model().await {
+                            // Extract original user ID from message content (format: "shared by <@123456789>")
+                            let original_user_id =
+                                self.extract_original_user_from_content(&message_model.content);
+
+                            let user_id = reaction.user_id;
+                            let can_delete = (original_user_id == Some(user_id))
+                                || self
+                                    .user_has_manage_messages_permission(
+                                        guild_id,
+                                        user_id,
+                                        reaction.channel_id,
+                                    )
+                                    .await
+                                    .unwrap_or(false);
+
+                            if can_delete {
+                                // Delete the message
+                                if let Err(e) = self
+                                    .http
+                                    .delete_message(reaction.channel_id, reaction.message_id)
+                                    .await
+                                {
+                                    error!("Failed to delete message: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {} // Ignore other emoji types
+        }
         Ok(())
     }
 
@@ -197,37 +259,35 @@ impl DiscordBot {
         interaction: &Interaction,
         data: &CommandData,
     ) -> Result<()> {
-        // Extract URL from command options
-        let url = data.options.iter()
-            .find(|opt| opt.name == "url")
-            .and_then(|opt| match &opt.value {
-                twilight_model::application::interaction::application_command::CommandOptionValue::String(s) => Some(s.as_str()),
-                _ => None,
-            })
-            .unwrap_or("");
+        let options = EmbedCommandOptions::from_command_data(data);
 
-        if url.is_empty() {
+        if options.url.is_empty() {
             self.respond_to_interaction(interaction, "Please provide a valid URL.")
                 .await?;
             return Ok(());
         }
 
-        if !self.media_downloader.is_supported_url(url) {
+        if !self.media_downloader.is_supported_url(&options.url) {
             self.respond_to_interaction(interaction, "This URL is not supported.")
                 .await?;
             return Ok(());
         }
 
-        // Acknowledge the interaction first
-        self.respond_to_interaction(interaction, "Downloading media...")
-            .await?;
+        // Acknowledge the interaction and download media concurrently
+        let (ack_result, download_result) = join!(
+            self.respond_to_interaction(interaction, "Downloading media..."),
+            self.media_downloader.download(&options.url)
+        );
 
-        // Download and process the media
-        match self.media_downloader.download(url).await {
+        // Check if acknowledgment failed
+        ack_result?;
+
+        // Process the download result
+        match download_result {
             Ok(media_info) => {
                 info!("Successfully downloaded: {}", media_info.metadata.title);
 
-                if let Some(_file_path) = &media_info.file_path {
+                if !media_info.files.is_empty() {
                     // Use the working channel upload method instead of interaction followup
                     let channel_id = match interaction.channel.as_ref() {
                         Some(channel) => channel.id,
@@ -243,7 +303,19 @@ impl DiscordBot {
                         }
                     };
 
-                    if let Err(e) = self.send_media_to_channel(&channel_id, &media_info).await {
+                    let user_id = interaction
+                        .author_id()
+                        .or_else(|| interaction.user.as_ref().map(|u| u.id));
+                    if let Err(e) = self
+                        .send_media_to_channel(
+                            &channel_id,
+                            user_id,
+                            &media_info,
+                            options.message,
+                            options.spoiler,
+                        )
+                        .await
+                    {
                         error!("Failed to send media to channel: {}", e);
                         let _ = self
                             .followup_message(interaction, "❌ Failed to send media file")
@@ -251,7 +323,7 @@ impl DiscordBot {
                     }
                 } else {
                     let _ = self
-                        .followup_message(interaction, "✅ Media processed but no file to send")
+                        .followup_message(interaction, "✅ Media processed but no files to send")
                         .await;
                 }
             }
@@ -303,41 +375,155 @@ impl DiscordBot {
     async fn send_media_to_channel(
         &self,
         channel_id: &Id<ChannelMarker>,
+        user_id: Option<twilight_model::id::Id<twilight_model::id::marker::UserMarker>>,
         media_info: &crate::media::MediaInfo,
+        message: Option<String>,
+        spoiler: bool,
     ) -> Result<()> {
-        if let Some(file_path) = &media_info.file_path {
-            let file_size = std::fs::metadata(file_path)?.len();
+        if media_info.files.is_empty() {
+            return Err(anyhow::anyhow!("No files to send"));
+        }
+
+        // Create attachments from in-memory files
+        let mut attachments = Vec::new();
+        let mut oversized_files = Vec::new();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+
+        for file in &media_info.files {
+            let file_size = file.data.len() as u64;
 
             // Discord has a 25MB file size limit for most servers
             if file_size > 25_000_000 {
-                self.http
-                    .create_message(*channel_id)
-                    .content(&format!(
-                        "❌ **{}** - File too large ({:.1}MB). Discord limit is 25MB.",
-                        media_info.metadata.title,
-                        file_size as f64 / 1_000_000.0
-                    ))
-                    .await?;
-                return Ok(());
+                oversized_files.push((file.filename.clone(), file_size));
+                continue;
+            }
+
+            let file_name = if spoiler {
+                format!("SPOILER_{}", file.filename)
+            } else {
+                file.filename.clone()
             };
-            let file_name = "media.mp4";
 
-            let attachment = Attachment::from_bytes(
-                file_name.to_string(),
-                std::fs::read(file_path)?,
-                SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
-            );
+            let attachment = Attachment::from_bytes(file_name, file.data.clone(), timestamp);
 
-            let content = format!("🎬 **{}**", media_info.url);
+            attachments.push(attachment);
+        }
+
+        // If all files are oversized, send error message
+        if attachments.is_empty() && !oversized_files.is_empty() {
+            let oversized_list = oversized_files
+                .iter()
+                .map(|(name, size)| format!("{} ({:.1}MB)", name, *size as f64 / 1_000_000.0))
+                .collect::<Vec<_>>()
+                .join(", ");
 
             self.http
                 .create_message(*channel_id)
-                .content(&content)
-                .attachments(&[attachment])
+                .content(&format!(
+                    "❌ {} - All files too large. Discord limit is 25MB.\nOversized files: {}",
+                    media_info.url, oversized_list
+                ))
                 .await?;
+            return Ok(());
+        }
+
+        // Build message content
+        let mut content = if let Some(user_id) = user_id {
+            format!("🎬 {} (shared by <@{}>)", media_info.url, user_id)
+        } else {
+            format!("🎬 {}", media_info.url)
+        };
+
+        if let Some(message_content) = message {
+            if !message_content.is_empty() {
+                content.push_str(&format!("\n{message_content}"));
+            }
+        }
+
+        // Add warning about oversized files if some were skipped
+        if !oversized_files.is_empty() {
+            let oversized_names = oversized_files
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            content.push_str(&format!("\n⚠️ Skipped oversized files: {oversized_names}"));
+        }
+
+        // Send message with attachments
+        let message = self
+            .http
+            .create_message(*channel_id)
+            .content(&content)
+            .attachments(&attachments)
+            .flags(MessageFlags::SUPPRESS_EMBEDS)
+            .await?;
+
+        // Add X reaction for easy deletion
+        if let Ok(msg) = message.model().await {
+            let _ = self
+                .http
+                .create_reaction(
+                    msg.channel_id,
+                    msg.id,
+                    &RequestReactionType::Unicode { name: "❌" },
+                )
+                .await;
         }
 
         Ok(())
+    }
+
+    async fn user_has_manage_messages_permission(
+        &self,
+        guild_id: twilight_model::id::Id<twilight_model::id::marker::GuildMarker>,
+        user_id: twilight_model::id::Id<twilight_model::id::marker::UserMarker>,
+        _channel_id: twilight_model::id::Id<twilight_model::id::marker::ChannelMarker>,
+    ) -> Result<bool> {
+        // Get the guild member to check their permissions
+        if let Ok(member) = self.http.guild_member(guild_id, user_id).await {
+            if let Ok(member_model) = member.model().await {
+                // Get guild to check roles
+                if let Ok(guild) = self.http.guild(guild_id).await {
+                    if let Ok(guild_model) = guild.model().await {
+                        // Check if user is guild owner
+                        if guild_model.owner_id == user_id {
+                            return Ok(true);
+                        }
+
+                        // Check roles for MANAGE_MESSAGES permission
+                        use twilight_model::guild::Permissions;
+                        for role_id in &member_model.roles {
+                            if let Some(role) = guild_model.roles.iter().find(|r| &r.id == role_id)
+                            {
+                                if role.permissions.contains(Permissions::MANAGE_MESSAGES) {
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn extract_original_user_from_content(
+        &self,
+        content: &str,
+    ) -> Option<twilight_model::id::Id<twilight_model::id::marker::UserMarker>> {
+        // Look for pattern: "shared by <@123456789>"
+        if let Some(start) = content.find("shared by <@") {
+            let user_mention = &content[start + 12..]; // Skip "shared by <@"
+            if let Some(end) = user_mention.find('>') {
+                let user_id_str = &user_mention[..end];
+                if let Ok(user_id) = user_id_str.parse::<u64>() {
+                    return Some(twilight_model::id::Id::new(user_id));
+                }
+            }
+        }
+        None
     }
 
     fn extract_urls(&self, content: &str) -> Vec<String> {
@@ -359,4 +545,45 @@ pub async fn run() -> Result<()> {
 
     let bot = DiscordBot::new(token).await?;
     bot.run().await
+}
+
+struct EmbedCommandOptions {
+    url: String,
+    message: Option<String>,
+    spoiler: bool,
+}
+
+impl EmbedCommandOptions {
+    fn from_command_data(data: &CommandData) -> Self {
+        let mut url = String::new();
+        let mut message = None;
+        let mut spoiler = false;
+
+        for opt in &data.options {
+            match opt.name.as_str() {
+                "url" => {
+                    if let twilight_model::application::interaction::application_command::CommandOptionValue::String(s) = &opt.value {
+                        url = s.clone();
+                    }
+                }
+                "message" => {
+                    if let twilight_model::application::interaction::application_command::CommandOptionValue::String(s) = &opt.value {
+                        message = Some(s.clone());
+                    }
+                }
+                "spoiler" => {
+                    if let twilight_model::application::interaction::application_command::CommandOptionValue::Boolean(b) = &opt.value {
+                        spoiler = *b;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            url,
+            message,
+            spoiler,
+        }
+    }
 }

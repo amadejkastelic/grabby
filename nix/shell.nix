@@ -1,5 +1,5 @@
 {
-  pkgs ? import <nixpkgs-unstable> { },
+  pkgs ? import <nixos-unstable> { },
   pre-commit-check ? null,
 }:
 pkgs.mkShell {
@@ -9,7 +9,9 @@ pkgs.mkShell {
     rust-analyzer
     rustfmt
     clippy
+
     yt-dlp
+    gallery-dl
   ];
   shellHook = if pre-commit-check != null then pre-commit-check.shellHook else "";
 }
