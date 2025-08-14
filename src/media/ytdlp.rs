@@ -54,6 +54,7 @@ impl YtDlpDownloader {
             duration: json["duration"].as_f64().map(|d| d as u64),
             author: json["uploader"].as_str().map(|s| s.to_string()),
             likes: json["like_count"].as_u64(),
+            format_ext: json["ext"].as_str().unwrap_or("mp4").to_string(),
         })
     }
 
@@ -71,14 +72,22 @@ impl YtDlpDownloader {
                 .arg("--output")
                 .arg("-") // Output to stdout
                 .arg("--format")
-                .arg("best[height<=720]/bestvideo[height<=720]+bestaudio/best[filesize<25M]/bestvideo+bestaudio/best")
+                .arg("best[height<=720]/best")
+                .arg("--merge-output-format")
+                .arg("mp4")
+                .arg("--recode-video")
+                .arg("mp4")
+                .arg("--postprocessor-args")
+                .arg("ffmpeg:-fs 7M")
                 .arg("--no-warnings")
                 .arg(url)
-                .output()
+                .output(),
         )
         .await
         .context("Media download timed out")?
         .context("Failed to download media")?;
+
+        let filename = format!("{}.{}", metadata.id, metadata.format_ext,);
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
@@ -92,6 +101,12 @@ impl YtDlpDownloader {
                     tokio::process::Command::new("yt-dlp")
                         .arg("--output")
                         .arg("-")
+                        .arg("--merge-output-format")
+                        .arg("mp4")
+                        .arg("--recode-video")
+                        .arg("mp4")
+                        .arg("--postprocessor-args")
+                        .arg("ffmpeg:-fs 7M")
                         .arg("--no-warnings")
                         .arg(url)
                         .output(),
@@ -106,9 +121,8 @@ impl YtDlpDownloader {
                 }
 
                 return Ok(vec![MediaFile {
-                    filename: format!("{}.mp4", metadata.id),
+                    filename,
                     data: retry_output.stdout,
-                    content_type: Some("video/mp4".to_string()),
                 }]);
             } else {
                 return Err(anyhow::anyhow!("Media download failed: {}", error));
@@ -116,9 +130,8 @@ impl YtDlpDownloader {
         }
 
         Ok(vec![MediaFile {
-            filename: format!("{}.mp4", metadata.id),
+            filename,
             data: output.stdout,
-            content_type: Some("video/mp4".to_string()),
         }])
     }
 }
@@ -141,7 +154,8 @@ impl Downloader for YtDlpDownloader {
     }
 
     async fn test_availability() -> bool {
-        match tokio::process::Command::new("yt-dlp")
+        // Test yt-dlp
+        let yt_dlp_available = match tokio::process::Command::new("yt-dlp")
             .arg("--version")
             .output()
             .await
@@ -160,6 +174,41 @@ impl Downloader for YtDlpDownloader {
                 warn!("❌ yt-dlp not found: {}", e);
                 false
             }
+        };
+
+        // Test ffmpeg (required for merging and re-encoding)
+        let ffmpeg_available = match tokio::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .await
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let version_line = String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .next()
+                        .unwrap_or("unknown")
+                        .to_string();
+                    info!("✅ ffmpeg is available: {}", version_line);
+                    true
+                } else {
+                    warn!("❌ ffmpeg command failed");
+                    false
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "❌ ffmpeg not found: {} (required for video merging/re-encoding)",
+                    e
+                );
+                false
+            }
+        };
+
+        if yt_dlp_available && !ffmpeg_available {
+            warn!("⚠️  yt-dlp will work but video merging/re-encoding features will be disabled");
         }
+
+        yt_dlp_available
     }
 }

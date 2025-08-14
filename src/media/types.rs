@@ -7,6 +7,7 @@ pub struct MediaMetadata {
     pub duration: Option<u64>,
     pub author: Option<String>,
     pub likes: Option<u64>,
+    pub format_ext: String,
 }
 
 #[derive(Debug)]
@@ -14,7 +15,6 @@ pub struct MediaMetadata {
 pub struct MediaFile {
     pub filename: String,
     pub data: Vec<u8>,
-    pub content_type: Option<String>, // MIME type like "image/jpeg", "video/mp4"
 }
 
 #[derive(Debug)]

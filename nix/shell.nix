@@ -9,8 +9,11 @@ pkgs.mkShell {
     rust-analyzer
     rustfmt
     clippy
+    pkg-config
+    openssl
 
     yt-dlp
+    ffmpeg
     gallery-dl
   ];
   shellHook = if pre-commit-check != null then pre-commit-check.shellHook else "";

@@ -90,6 +90,10 @@ impl GalleryDlDownloader {
                                         .as_u64()
                                         .or(meta["score"].as_u64())
                                         .or(meta["favorite_count"].as_u64()),
+                                    format_ext: meta["extension"]
+                                        .as_str()
+                                        .unwrap_or("jpg")
+                                        .to_string(),
                                 });
                             }
                         }
@@ -136,56 +140,20 @@ impl GalleryDlDownloader {
             ));
         }
 
-        // Get content type and data
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|ct| ct.to_str().ok())
-            .map(|s| s.to_string());
-
         let data = response
             .bytes()
             .await
             .context("Failed to read media data")?
             .to_vec();
 
-        // Generate filename based on content type or URL
-        let extension = if let Some(ct) = &content_type {
-            match ct.as_str() {
-                s if s.starts_with("image/jpeg") => "jpg",
-                s if s.starts_with("image/png") => "png",
-                s if s.starts_with("image/gif") => "gif",
-                s if s.starts_with("image/webp") => "webp",
-                s if s.starts_with("video/mp4") => "mp4",
-                s if s.starts_with("video/webm") => "webm",
-                _ => "bin",
-            }
-        } else if url.ends_with(".jpg") || url.ends_with(".jpeg") {
-            "jpg"
-        } else if url.ends_with(".png") {
-            "png"
-        } else if url.ends_with(".gif") {
-            "gif"
-        } else if url.ends_with(".webp") {
-            "webp"
-        } else if url.ends_with(".mp4") {
-            "mp4"
-        } else {
-            "bin"
-        };
-
         // Use metadata ID for filename, fallback to index
         let filename = if index == 0 {
-            format!("{}.{extension}", metadata.id)
+            format!("{}.{}", metadata.id, metadata.format_ext)
         } else {
-            format!("{}_{}.{extension}", metadata.id, index + 1)
+            format!("{}_{}.{}", metadata.id, metadata.format_ext, index + 1)
         };
 
-        Ok(MediaFile {
-            filename,
-            data,
-            content_type,
-        })
+        Ok(MediaFile { filename, data })
     }
 }
 
