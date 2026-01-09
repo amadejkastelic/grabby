@@ -54,6 +54,9 @@ docker pull ghcr.io/amadejkastelic/grabby:latest
 Install and run using Nix flakes:
 
 ```bash
+# Run without cloning
+nix run github:amadejkastelic/grabby --accept-flake-config
+
 # Build the package
 nix build .#grabby
 
@@ -65,6 +68,21 @@ nix develop
 
 # Build Docker image
 nix build .#docker
+```
+
+#### Cachix Cache
+
+The project uses [Cachix](https://cachix.org) to cache build outputs, speeding up Nix builds.
+
+To configure Cachix on NixOS, add this to your configuration:
+
+```nix
+{
+  nix.settings = {
+    substituters = ["https://amadejkastelic.cachix.org"];
+    trusted-public-keys = ["amadejkastelic.cachix.org-1:EiQfTbiT0UKsynF4q3nbNYjNH6/l7zuhrNkQTuXmyOs="];
+  };
+}
 ```
 
 #### NixOS Module
