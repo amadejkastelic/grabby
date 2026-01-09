@@ -1,0 +1,198 @@
+name: Build and publish the container image
+
+"on":
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry to push to'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - ghcr
+          - dockerhub
+
+jobs:
+  build-images:
+    name: Build image
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64-linux, aarch64-linux]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get tag
+        id: get-tag
+        run: |
+          TAG=$(git describe --tags HEAD)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "$TAG" > tag.txt
+
+      - name: Upload tag artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tag
+          path: tag.txt
+
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          nix_on_tmpfs: true
+
+      - name: Hash flake
+        shell: bash
+        run: |
+          shopt -s extglob
+          flake_hash=$(sha256sum flake.@(nix|lock) | sha256sum | sed 's/[[:blank:]].*//')
+          echo "flake_hash=${flake_hash}" >> $GITHUB_ENV
+
+      - name: Cache Nix Store
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ env.flake_hash }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size-linux: 0
+
+      - name: Build Docker image
+        id: build
+        run: |
+          nix build -L --accept-flake-config .#packages.${{ matrix.arch }}.docker
+          echo "path=$(realpath result)" >> $GITHUB_OUTPUT
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.path }}
+          retention-days: 1
+
+  push-ghcr:
+    name: Push to GitHub Container Registry
+    needs: build-images
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || inputs.registry == 'both' || inputs.registry == 'ghcr' }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download tag artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tag
+
+      - name: Read tag from file
+        id: read-tag
+        run: |
+          TAG=$(cat tag.txt)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download x86_64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: container-x86_64-linux
+          path: ./x86_64-linux-image
+
+      - name: Download aarch64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: container-aarch64-linux
+          path: ./aarch64-linux-image
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load and push images
+        run: |
+          docker load < ./x86_64-linux-image/$(ls ./x86_64-linux-image)
+          docker load < ./aarch64-linux-image/$(ls ./aarch64-linux-image)
+
+          IMAGE_NAME=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+          TAG=${{ steps.read-tag.outputs.tag }}
+
+          docker tag $IMAGE_NAME ghcr.io/${{ github.repository }}:${TAG}-amd64
+          docker push ghcr.io/${{ github.repository }}:${TAG}-amd64
+
+          docker tag $IMAGE_NAME ghcr.io/${{ github.repository }}:${TAG}-arm64
+          docker push ghcr.io/${{ github.repository }}:${TAG}-arm64
+
+          docker manifest create ghcr.io/${{ github.repository }}:${TAG} \
+            ghcr.io/${{ github.repository }}:${TAG}-amd64 \
+            ghcr.io/${{ github.repository }}:${TAG}-arm64
+          docker manifest push ghcr.io/${{ github.repository }}:${TAG}
+
+          docker manifest create ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:${TAG}-amd64 \
+            ghcr.io/${{ github.repository }}:${TAG}-arm64
+          docker manifest push ghcr.io/${{ github.repository }}:latest
+
+  push-dockerhub:
+    name: Push to Docker Hub
+    needs: build-images
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || inputs.registry == 'both' || inputs.registry == 'dockerhub' }}
+    steps:
+      - name: Download tag artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tag
+
+      - name: Read tag from file
+        id: read-tag
+        run: |
+          TAG=$(cat tag.txt)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download x86_64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: container-x86_64-linux
+          path: ./x86_64-linux-image
+
+      - name: Download aarch64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: container-aarch64-linux
+          path: ./aarch64-linux-image
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Load and push images
+        run: |
+          docker load < ./x86_64-linux-image/$(ls ./x86_64-linux-image)
+          docker load < ./aarch64-linux-image/$(ls ./aarch64-linux-image)
+
+          IMAGE_NAME=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+          TAG=${{ steps.read-tag.outputs.tag }}
+
+          docker tag $IMAGE_NAME ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-amd64
+          docker push ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-amd64
+
+          docker tag $IMAGE_NAME ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
+          docker push ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
+
+          docker manifest create ${{ vars.DOCKER_USERNAME }}/grabby:${TAG} \
+            ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-amd64 \
+            ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
+          docker manifest push ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}
+
+          docker manifest create ${{ vars.DOCKER_USERNAME }}/grabby:latest \
+            ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-amd64 \
+            ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
+          docker manifest push ${{ vars.DOCKER_USERNAME }}/grabby:latest
