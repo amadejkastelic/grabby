@@ -48,7 +48,6 @@ cargo build --release
 ## Environment Variables
 - `DISCORD_TOKEN`: Discord bot token (optional if set in config file)
 - `CONFIG_FILE`: Path to config file (optional)
-- `LOG_LEVEL`: Log level (default: info)
 
 ## Configuration
 

@@ -37,6 +37,7 @@ impl ServerConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct LoggingConfig {
     pub format: Option<String>,
+    pub level: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -72,6 +73,13 @@ impl Config {
             .as_ref()
             .and_then(|l| l.format.as_deref())
             .unwrap_or("json")
+    }
+
+    pub fn get_log_level(&self) -> &str {
+        self.logging
+            .as_ref()
+            .and_then(|l| l.level.as_deref())
+            .unwrap_or("info")
     }
 }
 

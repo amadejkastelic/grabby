@@ -132,6 +132,9 @@ jobs:
           docker tag $ARM64_IMAGE ghcr.io/${{ github.repository }}:${TAG}-arm64
           docker push ghcr.io/${{ github.repository }}:${TAG}-arm64
 
+          docker manifest rm ghcr.io/${{ github.repository }}:latest || true
+          docker manifest rm ghcr.io/${{ github.repository }}:${TAG} || true
+
           docker manifest create ghcr.io/${{ github.repository }}:${TAG} \
             ghcr.io/${{ github.repository }}:${TAG}-amd64 \
             ghcr.io/${{ github.repository }}:${TAG}-arm64
@@ -189,6 +192,9 @@ jobs:
 
           docker tag $ARM64_IMAGE ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
           docker push ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-arm64
+
+          docker manifest rm ${{ vars.DOCKER_USERNAME }}/grabby:latest || true
+          docker manifest rm ${{ vars.DOCKER_USERNAME }}/grabby:${TAG} || true
 
           docker manifest create ${{ vars.DOCKER_USERNAME }}/grabby:${TAG} \
             ${{ vars.DOCKER_USERNAME }}/grabby:${TAG}-amd64 \

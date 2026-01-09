@@ -48,16 +48,19 @@ fn get_config_path(args: &Args) -> Option<String> {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    let (log_format, log_level) = if let Some(config_path) = get_config_path(&args) {
+        let config_file = crate::config::Config::from_file(&config_path)?;
+        (
+            config_file.get_logging_format().to_string(),
+            config_file.get_log_level().to_string(),
+        )
+    } else {
+        ("json".to_string(), "info".to_string())
+    };
+
     let env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
-
-    let log_format = if let Some(config_path) = get_config_path(&args) {
-        let config_file = crate::config::Config::from_file(&config_path)?;
-        config_file.get_logging_format().to_string()
-    } else {
-        "json".to_string()
-    };
+        .parse_lossy(&log_level);
 
     if log_format == "json" {
         tracing_subscriber::fmt()
