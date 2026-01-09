@@ -1,0 +1,19 @@
+name: Checks
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  check:
+    strategy:
+      matrix:
+        command:
+          - nix flake check -L
+
+    uses: ./.github/workflows/nix.yaml
+    with:
+      command: ${{ matrix.command }}
+
+  build:
+    needs: check
+    uses: ./.github/workflows/build.yaml
+    secrets: inherit

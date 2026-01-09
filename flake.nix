@@ -1,5 +1,12 @@
 {
-  description = "Grabby - Media Embedding Bot";
+  description = "Grabby - Media Embedding Discord Bot";
+
+  nixConfig = {
+    extra-substituters = [ "https://amadejkastelic.cachix.org" ];
+    extra-trusted-public-keys = [
+      "amadejkastelic.cachix.org-1:EiQfTbiT0UKsynF4q3nbNYjNH6/l7zuhrNkQTuXmyOs="
+    ];
+  };
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -12,6 +19,11 @@
       url = "github:cachix/pre-commit-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    nix-github-actions = {
+      url = "github:nix-community/nix-github-actions";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -21,6 +33,7 @@
       rust-overlay,
       flake-utils,
       pre-commit-hooks,
+      nix-github-actions,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -65,6 +78,10 @@
         checks = {
           pre-commit-check = pre-commit-check;
           package = grabbyPkg;
+        };
+
+        githubActions = nix-github-actions.lib.mkGithubMatrix {
+          inherit (self) checks;
         };
       }
     );

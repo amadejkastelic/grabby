@@ -1,0 +1,14 @@
+name: Build
+
+on:
+  workflow_call:
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/nix.yaml
+    with:
+      command: nix build .# -L
+    secrets: inherit
