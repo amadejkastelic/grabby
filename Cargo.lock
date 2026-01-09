@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "grabby"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
