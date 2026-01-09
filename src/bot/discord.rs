@@ -49,6 +49,7 @@ pub struct DiscordBot {
     media_downloader: MediaDownloader,
     config: ConfigManager,
     application_id: Id<twilight_model::id::marker::ApplicationMarker>,
+    user_id: Id<twilight_model::id::marker::UserMarker>,
 }
 
 impl DiscordBot {
@@ -78,6 +79,12 @@ impl DiscordBot {
             response.model().await?.id
         };
 
+        // Get bot user ID
+        let user_id = {
+            let response = http.current_user().await?;
+            response.model().await?.id
+        };
+
         let bot = Self {
             http,
             cache,
@@ -85,6 +92,7 @@ impl DiscordBot {
             media_downloader,
             config,
             application_id,
+            user_id,
         };
 
         // Register slash commands
@@ -223,6 +231,11 @@ impl DiscordBot {
         // Only handle X emoji reactions
         match &reaction.emoji {
             EmojiReactionType::Unicode { name } if name == "❌" => {
+                // Skip if the reactor is the bot itself
+                if reaction.user_id == self.user_id {
+                    return Ok(());
+                }
+
                 // Check if the reaction was added by the message author or a server admin
                 if let Some(guild_id) = reaction.guild_id {
                     // Get the message to extract the original author
