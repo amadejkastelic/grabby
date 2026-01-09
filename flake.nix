@@ -70,6 +70,8 @@
           };
         };
 
+        nixosModules.grabby = import ./nix/module.nix;
+
         devShells.default = pkgs.callPackage ./nix/shell.nix {
           pre-commit-check = pre-commit-check;
           pkgs = pkgs;
