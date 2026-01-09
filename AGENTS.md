@@ -29,7 +29,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 
 ## Development Commands
 ```bash
-# Run the bot in development mode
+# Run bot in development mode
 cargo run
 
 # Run tests
@@ -44,6 +44,35 @@ cargo clippy -- -D warnings
 # Build release version
 cargo build --release
 ```
+
+## NixOS Module
+
+The NixOS module provides system service configuration for Grabby:
+
+```nix
+{ config, pkgs, ... }: {
+  services.grabby = {
+    enable = true;
+    logLevel = "info";
+    environmentFile = "/run/secrets/grabby-env";
+
+    servers = [
+      {
+        serverId = "123456789";
+        autoEmbedChannels = [ "channel1" "channel2" ];
+        embedEnabled = true;
+      }
+    ];
+  };
+}
+```
+
+The module automatically:
+- Creates a systemd user and group (grabby:grabby)
+- Generates the TOML config file from Nix options
+- Configures environmentFile for secrets (compatible with sops-nix)
+- Sets up the systemd service with security hardening
+- Adds the grabby package to system packages
 
 ## Environment Variables
 - `DISCORD_TOKEN`: Discord bot token (optional if set in config file)

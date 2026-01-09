@@ -67,6 +67,56 @@ nix develop
 nix build .#docker
 ```
 
+#### NixOS Module
+
+On NixOS systems, you can configure grabby as a system service:
+
+```nix
+# flake.nix
+{
+  inputs.grabby.url = "github:amadejkastelic/grabby";
+  # ... other inputs
+
+  outputs = { self, nixpkgs, grabby, ... }: {
+    nixosConfigurations.yourHostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ./configuration.nix
+        grabby.nixosModules.grabby
+      ];
+    };
+  };
+}
+```
+
+```nix
+# configuration.nix
+{ config, pkgs, ... }: {
+  services.grabby = {
+    enable = true;
+    logLevel = "info";
+    environmentFile = config.sops.secrets.discord-token.path;
+
+    servers = [
+      {
+        serverId = "123456789";
+        autoEmbedChannels = [
+          "channel1"
+          "channel2"
+        ];
+        embedEnabled = true;
+      }
+    ];
+  };
+
+  # If using sops
+  sops.secrets.discord-token = {
+    owner = config.services.grabby.user;
+    group = config.services.grabby.group;
+  };
+}
+```
+
 ## Configuration
 
 ### Config File Locations
