@@ -2,6 +2,6 @@
 .direnv/
 .pre-commit-config.yaml
 downloads/
-result/
+result
 target/
 config.toml
