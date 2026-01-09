@@ -18,6 +18,7 @@ pkgs.dockerTools.buildLayeredImage {
   ];
 
   config = {
+    architecture = pkgs.stdenv.hostPlatform.uname.processor;
     Entrypoint = [ "grabby" ];
     Env = [
       "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"

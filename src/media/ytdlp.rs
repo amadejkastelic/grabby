@@ -5,6 +5,7 @@ use super::{
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 pub struct YtDlpDownloader;
@@ -65,20 +66,17 @@ impl YtDlpDownloader {
     ) -> Result<Vec<MediaFile>> {
         info!("Downloading media with yt-dlp: {}", metadata.id);
 
-        // Use yt-dlp to output to stdout
+        // Force H.264 codec for Discord Linux compatibility
+        // Try H.264 formats first (vcodec=h264 or starts with h264), fallback to best available
         let output = tokio::time::timeout(
-            std::time::Duration::from_secs(120), // 2 minutes for download
-            tokio::process::Command::new("yt-dlp")
+            std::time::Duration::from_secs(120),
+            Command::new("yt-dlp")
                 .arg("--output")
-                .arg("-") // Output to stdout
+                .arg("-")
                 .arg("--format")
-                .arg("best[height<=720]/best")
+                .arg("bestvideo[vcodec=h264]+bestaudio/best[vcodec=h264]/bestvideo[vcodec=avc1]+bestaudio/best[vcodec=avc1]/best")
                 .arg("--merge-output-format")
                 .arg("mp4")
-                .arg("--recode-video")
-                .arg("mp4")
-                .arg("--postprocessor-args")
-                .arg("ffmpeg:-fs 7M")
                 .arg("--no-warnings")
                 .arg(url)
                 .output(),
@@ -87,46 +85,11 @@ impl YtDlpDownloader {
         .context("Media download timed out")?
         .context("Failed to download media")?;
 
-        let filename = format!("{}.{}", metadata.id, metadata.format_ext,);
+        let filename = format!("{}.{}", metadata.id, metadata.format_ext);
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-
-            // If format issue, try without format specification
-            if error.contains("Requested format is not available") {
-                warn!("Format not available, retrying without format specification...");
-
-                let retry_output = tokio::time::timeout(
-                    std::time::Duration::from_secs(120), // 2 minutes for retry
-                    tokio::process::Command::new("yt-dlp")
-                        .arg("--output")
-                        .arg("-")
-                        .arg("--merge-output-format")
-                        .arg("mp4")
-                        .arg("--recode-video")
-                        .arg("mp4")
-                        .arg("--postprocessor-args")
-                        .arg("ffmpeg:-fs 7M")
-                        .arg("--no-warnings")
-                        .arg(url)
-                        .output(),
-                )
-                .await
-                .context("Media download retry timed out")?
-                .context("Failed to retry media download")?;
-
-                if !retry_output.status.success() {
-                    let retry_error = String::from_utf8_lossy(&retry_output.stderr);
-                    return Err(anyhow::anyhow!("Media download failed: {}", retry_error));
-                }
-
-                return Ok(vec![MediaFile {
-                    filename,
-                    data: retry_output.stdout,
-                }]);
-            } else {
-                return Err(anyhow::anyhow!("Media download failed: {}", error));
-            }
+            return Err(anyhow::anyhow!("Media download failed: {}", error));
         }
 
         Ok(vec![MediaFile {
