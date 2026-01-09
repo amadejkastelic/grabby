@@ -17,8 +17,3 @@ jobs:
     uses: ./.github/workflows/nix.yaml
     with:
       command: ${{ matrix.command }}
-
-  build:
-    needs: check
-    uses: ./.github/workflows/build.yaml
-    secrets: inherit
