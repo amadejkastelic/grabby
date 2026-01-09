@@ -3,8 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     rust-overlay.url = "github:oxalica/rust-overlay";
+
     flake-utils.url = "github:numtide/flake-utils";
+
     pre-commit-hooks = {
       url = "github:cachix/pre-commit-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -27,7 +30,7 @@
           inherit system overlays;
         };
 
-        grabby = pkgs.callPackage ./nix/default.nix { };
+        grabbyPkg = pkgs.callPackage ./nix/default.nix { };
 
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -43,12 +46,14 @@
         };
       in
       {
-        packages = {
+        packages = rec {
+          grabby = grabbyPkg;
+
           default = grabby;
 
           docker = import ./nix/docker.nix {
             inherit pkgs;
-            grabby = grabby;
+            grabby = grabbyPkg;
           };
         };
 
@@ -59,7 +64,7 @@
 
         checks = {
           pre-commit-check = pre-commit-check;
-          package = grabby;
+          package = grabbyPkg;
         };
       }
     );

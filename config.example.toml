@@ -1,0 +1,30 @@
+# Grabby Configuration File
+# Place this in one of these locations:
+# 1. CLI argument: grabby --config /path/to/config.toml
+# 2. Environment variable: CONFIG_FILE=/path/to/config.toml
+# 3. XDG config directory: $XDG_CONFIG_HOME/grabby/config.toml
+# 4. Default home directory: ~/.config/grabby/config.toml
+
+# Discord configuration (optional)
+[discord]
+# Bot token (will use DISCORD_TOKEN env var if not set)
+# token = "your_bot_token_here"
+
+# Logging configuration (optional)
+[logging]
+# Format: "json" or "pretty" (default: "json")
+format = "json"
+
+[[servers]]
+server_id = "YOUR_DISCORD_SERVER_ID"
+auto_embed_channels = [
+  "CHANNEL_ID_1",
+  "CHANNEL_ID_2"
+]
+embed_enabled = true
+
+# Add more servers by repeating the [[servers]] section
+# [[servers]]
+# server_id = "ANOTHER_SERVER_ID"
+# auto_embed_channels = ["CHANNEL_ID_3"]
+# embed_enabled = false

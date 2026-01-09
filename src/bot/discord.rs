@@ -24,6 +24,24 @@ use twilight_model::{
 };
 use twilight_util::builder::command::{BooleanBuilder, CommandBuilder, StringBuilder};
 
+fn clean_error_message(error: &anyhow::Error) -> String {
+    let error_str = error.to_string().to_lowercase();
+
+    if error_str.contains("unsupported url") || error_str.contains("no extractor found") {
+        return "Unsupported URL".to_string();
+    }
+
+    if error_str.contains("network error") || error_str.contains("connection") {
+        return "Network error - please try again".to_string();
+    }
+
+    if error_str.contains("timeout") {
+        return "Request timed out - please try again".to_string();
+    }
+
+    "Download failed".to_string()
+}
+
 pub struct DiscordBot {
     http: HttpClient,
     cache: InMemoryCache,
@@ -35,6 +53,10 @@ pub struct DiscordBot {
 
 impl DiscordBot {
     pub async fn new(token: String) -> Result<Self> {
+        Self::new_with_config(token, ConfigManager::new()).await
+    }
+
+    pub async fn new_with_config(token: String, config: ConfigManager) -> Result<Self> {
         let http = HttpClient::new(token.clone());
         let cache = InMemoryCache::new();
 
@@ -49,8 +71,6 @@ impl DiscordBot {
         if let Err(e) = media_downloader.test_setup().await {
             warn!("Media downloader test failed: {}", e);
         }
-
-        let config = ConfigManager::new();
 
         // Get application ID
         let application_id = {
@@ -151,7 +171,6 @@ impl DiscordBot {
                 .config
                 .is_auto_embed_channel(&guild_id.to_string(), &msg.channel_id.to_string())
             {
-                // Extract URLs from message content and process the first supported one
                 for url in self.extract_urls(&msg.content) {
                     if self.media_downloader.is_supported_url(&url) {
                         match self.media_downloader.download(&url).await {
@@ -162,15 +181,32 @@ impl DiscordBot {
                                         &msg.channel_id,
                                         Some(msg.author.id),
                                         &media_info,
-                                        Some("".to_string()),
+                                        None,
                                         false,
                                     )
                                     .await
                                 {
+                                    let error_msg = format!("❌ Failed to send media: {}", e);
+                                    let _ = self
+                                        .http
+                                        .create_message(msg.channel_id)
+                                        .content(&error_msg)
+                                        .await;
                                     error!("Failed to send media to channel: {}", e);
+                                } else {
+                                    let _ = self.http.delete_message(msg.channel_id, msg.id).await;
                                 }
                             }
                             Err(e) => {
+                                let cleaned_error = clean_error_message(&e);
+                                let error_msg =
+                                    format!("Failed to download media: `{}`", cleaned_error);
+                                let _ = self
+                                    .http
+                                    .create_message(msg.channel_id)
+                                    .content(&error_msg)
+                                    .reply(msg.id)
+                                    .await;
                                 error!("Failed to download media from {}: {}", url, e);
                             }
                         }
@@ -293,7 +329,7 @@ impl DiscordBot {
                             let _ = self
                                 .followup_message(
                                     interaction,
-                                    "❌ Cannot determine channel for upload",
+                                    "Cannot determine channel for upload",
                                 )
                                 .await;
                             return Ok(());
@@ -315,19 +351,26 @@ impl DiscordBot {
                     {
                         error!("Failed to send media to channel: {}", e);
                         let _ = self
-                            .followup_message(interaction, "❌ Failed to send media file")
+                            .followup_message(interaction, "Failed to send media file")
                             .await;
                     }
                 } else {
                     let _ = self
-                        .followup_message(interaction, "✅ Media processed but no files to send")
+                        .followup_message(interaction, "Media processed but no files to send")
                         .await;
                 }
             }
             Err(e) => {
-                error!("Failed to download media: {}", e);
+                let cleaned_error = clean_error_message(&e);
+                error!("Failed to download media from {}: {}", options.url, e);
                 let _ = self
-                    .followup_message(interaction, &format!("❌ Download failed: {e}"))
+                    .followup_message(
+                        interaction,
+                        &format!(
+                            "Failed to download media: {}\n{}",
+                            cleaned_error, options.url
+                        ),
+                    )
                     .await;
             }
         }
@@ -349,6 +392,7 @@ impl DiscordBot {
                 flags: Some(MessageFlags::EPHEMERAL),
                 title: None,
                 tts: None,
+                poll: None,
             }),
         };
 
@@ -401,10 +445,58 @@ impl DiscordBot {
             }
 
             // Discord has a 25MB file size limit for most servers
-            if file_size > 25_000_000 {
-                oversized_files.push((file.filename.clone(), file_size));
-                continue;
-            }
+            #[allow(unused_variables)]
+            let (file_data, file_size) = if file_size > 25_000_000 {
+                info!(
+                    "File {} is too large ({} MB), attempting to resize",
+                    file.filename,
+                    file_size as f64 / 1_000_000.0
+                );
+
+                let is_video = file.filename.ends_with(".mp4")
+                    || file.filename.ends_with(".webm")
+                    || file.filename.ends_with(".mov");
+
+                let resize_result = tokio::task::spawn_blocking({
+                    let file_data = file.data.clone();
+                    let file_name = file.filename.clone();
+                    move || {
+                        if is_video {
+                            crate::media::resize_media_file(&file_data, &file_name, 25)
+                        } else {
+                            crate::media::resize_image_file(&file_data, &file_name, 25)
+                        }
+                    }
+                })
+                .await;
+
+                match resize_result {
+                    Ok(Ok(resized_data)) => {
+                        info!(
+                            "Successfully resized {} from {} to {} bytes",
+                            file.filename,
+                            file_size,
+                            resized_data.len()
+                        );
+                        (resized_data.clone(), resized_data.len() as u64)
+                    }
+                    Ok(Err(e)) => {
+                        warn!(
+                            "Failed to resize {}: {}, marking as oversized",
+                            file.filename, e
+                        );
+                        oversized_files.push((file.filename.clone(), file_size));
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!("Resize task failed for {}: {}", file.filename, e);
+                        oversized_files.push((file.filename.clone(), file_size));
+                        continue;
+                    }
+                }
+            } else {
+                (file.data.clone(), file_size)
+            };
 
             let file_name = if spoiler {
                 format!("SPOILER_{}", file.filename)
@@ -412,7 +504,7 @@ impl DiscordBot {
                 file.filename.clone()
             };
 
-            let attachment = Attachment::from_bytes(file_name, file.data.clone(), attachment_id);
+            let attachment = Attachment::from_bytes(file_name, file_data, attachment_id);
             attachment_id += 1;
 
             attachments.push(attachment);
@@ -438,27 +530,32 @@ impl DiscordBot {
 
         // Build message content with metadata
         let mut content = if let Some(user_id) = user_id {
-            format!("🎬 {} (shared by <@{}>)", media_info.url, user_id)
+            format!("<@{}>", user_id)
         } else {
-            format!("🎬 {}", media_info.url)
+            "".to_string()
         };
 
-        // Add title
-        if !media_info.metadata.title.is_empty()
-            && media_info.metadata.title != "Unknown Title"
-            && media_info.metadata.title != "Unknown Media"
-        {
-            content.push_str(&format!("\n**{}**", media_info.metadata.title));
-        }
+        content.push_str(&format!("\n{}", media_info.url));
 
         // Add author if available
         if let Some(author) = &media_info.metadata.author {
-            content.push_str(&format!("\n👤 {author}"));
+            content.push_str(&format!("\n👤 Author: {author}"));
         }
 
         // Add likes if available
         if let Some(likes) = media_info.metadata.likes {
-            content.push_str(&format!("\n❤️ {likes} likes"));
+            content.push_str(&format!(
+                "\n❤️ Likes: {}",
+                crate::utils::format_number(likes)
+            ));
+        }
+
+        // Add title if available
+        if !media_info.metadata.title.is_empty()
+            && media_info.metadata.title != "Unknown Title"
+            && media_info.metadata.title != "Unknown Media"
+        {
+            content.push_str(&format!("\n> {}", media_info.metadata.title,));
         }
 
         // Add user message if provided
@@ -475,7 +572,7 @@ impl DiscordBot {
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            content.push_str(&format!("\n⚠️ Skipped oversized files: {oversized_names}"));
+            content.push_str(&format!("\nSkipped oversized files: {oversized_names}"));
         }
 
         // Send message with multiple attachments
@@ -578,6 +675,13 @@ pub async fn run() -> Result<()> {
     let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN environment variable is required");
 
     let bot = DiscordBot::new(token).await?;
+    bot.run().await
+}
+
+pub async fn run_with_config(config: ConfigManager) -> Result<()> {
+    let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN environment variable is required");
+
+    let bot = DiscordBot::new_with_config(token, config).await?;
     bot.run().await
 }
 

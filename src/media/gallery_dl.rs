@@ -150,7 +150,7 @@ impl GalleryDlDownloader {
         let filename = if index == 0 {
             format!("{}.{}", metadata.id, metadata.format_ext)
         } else {
-            format!("{}_{}.{}", metadata.id, metadata.format_ext, index + 1)
+            format!("{}_{}.{}", metadata.id, index + 1, metadata.format_ext)
         };
 
         Ok(MediaFile { filename, data })

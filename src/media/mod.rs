@@ -1,9 +1,11 @@
 mod downloader;
 mod gallery_dl;
+mod resize;
 mod types;
 mod ytdlp;
 
 pub use downloader::Downloader;
+pub use resize::{resize_image_file, resize_media_file};
 pub use types::MediaInfo;
 
 use anyhow::Result;
@@ -21,10 +23,11 @@ impl MediaDownloader {
             "Media downloader initialized - using in-memory downloads with yt-dlp and gallery-dl"
         );
 
-        // Create downloader instances in priority order (yt-dlp first, then gallery-dl)
+        // Create downloader instances in priority order (gallery-dl first, then yt-dlp)
         let downloaders: Vec<Box<dyn Downloader>> = vec![
-            Box::new(YtDlpDownloader::new()),
+            // gallery-dl is tried first as it also has yt-dlp integration
             Box::new(GalleryDlDownloader::new()),
+            Box::new(YtDlpDownloader::new()),
         ];
 
         Ok(Self { downloaders })
@@ -35,7 +38,6 @@ impl MediaDownloader {
 
         let mut errors = Vec::new();
 
-        // Try each downloader in order
         for downloader in &self.downloaders {
             match downloader.download(url).await {
                 Ok(media_info) => {
@@ -49,7 +51,6 @@ impl MediaDownloader {
             }
         }
 
-        // If all downloaders failed
         Err(anyhow::anyhow!(
             "Media download failed: {}",
             errors.join(". ")
