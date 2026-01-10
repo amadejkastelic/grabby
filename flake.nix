@@ -43,7 +43,7 @@
           inherit system overlays;
         };
 
-        grabbyPkg = pkgs.callPackage ./nix/default.nix { };
+        grabbyPkg = pkgs.callPackage ./nix/package.nix { };
 
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;

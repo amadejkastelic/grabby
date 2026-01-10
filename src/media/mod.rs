@@ -79,3 +79,25 @@ impl MediaDownloader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_media_downloader_new() {
+        let downloader = MediaDownloader::new();
+        assert!(downloader.is_ok());
+        let dl = downloader.unwrap();
+        assert_eq!(dl.downloaders.len(), 2);
+    }
+
+    #[test]
+    fn test_is_supported_url() {
+        let downloader = MediaDownloader::new().unwrap();
+        assert!(downloader.is_supported_url("https://example.com/video.mp4"));
+        assert!(downloader.is_supported_url("https://x.com/user/status/123"));
+        assert!(downloader.is_supported_url("https://youtube.com/watch?v=123"));
+        assert!(downloader.is_supported_url(""));
+    }
+}
