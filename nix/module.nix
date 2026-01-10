@@ -128,8 +128,13 @@ in
         ExecStart = "${cfg.package}/bin/grabby --config ${configFile}";
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
         ReadWritePaths = [ "/var/lib/grabby" ];
+        WorkingDirectory = "/var/lib/grabby";
       };
     };
+
+    systemd.tmpfiles.rules = [
+      "d /var/lib/grabby 0750 ${cfg.user} ${cfg.group} -"
+    ];
 
     environment.systemPackages = [ cfg.package ];
   };
