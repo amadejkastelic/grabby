@@ -70,8 +70,6 @@
           };
         };
 
-        nixosModules.grabby = import ./nix/module.nix;
-
         devShells.default = pkgs.callPackage ./nix/shell.nix {
           pre-commit-check = pre-commit-check;
           pkgs = pkgs;
@@ -81,10 +79,13 @@
           pre-commit-check = pre-commit-check;
           package = grabbyPkg;
         };
-
-        githubActions = nix-github-actions.lib.mkGithubMatrix {
-          inherit (self) checks;
-        };
       }
-    );
+    )
+    // {
+      nixosModules.grabby = import ./nix/module.nix;
+
+      githubActions = nix-github-actions.lib.mkGithubMatrix {
+        inherit (self) checks;
+      };
+    };
 }
