@@ -16,10 +16,17 @@ pkgs.rustPlatform.buildRustPackage {
   buildInputs = with pkgs; [
     yt-dlp
     gallery-dl
+    ffmpeg
   ];
 
   postFixup = ''
     wrapProgram $out/bin/grabby \
-      --prefix PATH : "${pkgs.yt-dlp}/bin:${pkgs.gallery-dl}/bin:$out/bin"
+      --prefix PATH : "${
+        pkgs.lib.makeBinPath [
+          pkgs.yt-dlp
+          pkgs.gallery-dl
+          pkgs.ffmpeg
+        ]
+      }"
   '';
 }
