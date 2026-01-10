@@ -82,7 +82,17 @@
       }
     )
     // {
-      nixosModules.grabby = import ./nix/module.nix;
+      nixosModules.grabby =
+        {
+          config,
+          pkgs,
+          lib,
+          ...
+        }:
+        import ./nix/module.nix {
+          inherit config pkgs lib;
+          package = self.packages.${pkgs.stdenv.hostPlatform.system}.grabby;
+        };
 
       githubActions = nix-github-actions.lib.mkGithubMatrix {
         inherit (self) checks;

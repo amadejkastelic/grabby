@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  package ? null,
   ...
 }:
 
@@ -23,7 +24,11 @@ in
   options.services.grabby = {
     enable = lib.mkEnableOption "Grabby - Media Embedding Discord Bot";
 
-    package = lib.mkPackageOption pkgs "grabby" { };
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = package;
+      description = "Package for the Grabby bot";
+    };
 
     environmentFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
