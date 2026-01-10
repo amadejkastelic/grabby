@@ -127,12 +127,6 @@ in
         RestartSec = "5s";
         ExecStart = "${cfg.package}/bin/grabby --config ${configFile}";
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
-
-        # Security hardening
-        NoNewPrivileges = true;
-        PrivateTmp = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
         ReadWritePaths = [ "/var/lib/grabby" ];
       };
     };
