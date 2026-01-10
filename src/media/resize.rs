@@ -147,3 +147,76 @@ pub fn resize_image_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
 
     Ok(resized_data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_small_test_data() -> Vec<u8> {
+        vec![0; 1_000_000]
+    }
+
+    #[test]
+    fn test_resize_image_file_within_limit() {
+        let data = create_small_test_data();
+        let result = resize_image_file(&data, "test.jpg", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert_eq!(resized.len(), data.len());
+        assert_eq!(resized, data);
+    }
+
+    #[test]
+    fn test_resize_image_file_exactly_at_limit() {
+        let data = vec![0; 25_000_000];
+        let result = resize_image_file(&data, "test.jpg", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert_eq!(resized.len(), data.len());
+    }
+
+    #[test]
+    fn test_resize_media_file_within_limit() {
+        let data = create_small_test_data();
+        let result = resize_media_file(&data, "test.mp4", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert_eq!(resized.len(), data.len());
+        assert_eq!(resized, data);
+    }
+
+    #[test]
+    fn test_resize_media_file_exactly_at_limit() {
+        let data = vec![0; 25_000_000];
+        let result = resize_media_file(&data, "test.mp4", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert_eq!(resized.len(), data.len());
+    }
+
+    #[test]
+    #[ignore = "Requires ffmpeg installed"]
+    fn test_resize_image_file_exceeds_limit() {
+        let data = vec![0; 30_000_000];
+        let result = resize_image_file(&data, "test.jpg", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert!(resized.len() < data.len());
+    }
+
+    #[test]
+    #[ignore = "Requires ffmpeg installed"]
+    fn test_resize_media_file_exceeds_limit() {
+        let data = vec![0; 30_000_000];
+        let result = resize_media_file(&data, "test.mp4", 25);
+
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert!(resized.len() < data.len());
+    }
+}

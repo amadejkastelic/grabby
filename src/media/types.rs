@@ -11,7 +11,6 @@ pub struct MediaMetadata {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct MediaFile {
     pub filename: String,
     pub data: Vec<u8>,
