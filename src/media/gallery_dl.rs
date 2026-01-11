@@ -72,12 +72,15 @@ impl GalleryDlDownloader {
     }
 
     async fn extract_metadata_and_urls(&self, url: &str) -> Result<(MediaMetadata, Vec<String>)> {
-        debug!("Extracting metadata with gallery-dl for: {}", url);
+        debug!(
+            "Extracting metadata with gallery-dl (resolving redirects) for: {}",
+            url
+        );
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(30),
             tokio::process::Command::new("gallery-dl")
-                .arg("--dump-json")
+                .arg("--resolve-json")
                 .arg(url)
                 .output(),
         )
@@ -94,7 +97,7 @@ impl GalleryDlDownloader {
         }
 
         let json_str = String::from_utf8_lossy(&output.stdout);
-        debug!("gallery-dl raw JSON output: {}", json_str);
+        debug!("gallery-dl raw JSON output (resolved): {}", json_str);
 
         let json_array: Value =
             serde_json::from_str(&json_str).context("Failed to parse media metadata")?;
