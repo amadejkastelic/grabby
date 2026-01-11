@@ -608,9 +608,8 @@ impl DiscordBot {
         &self,
         content: &str,
     ) -> Option<twilight_model::id::Id<twilight_model::id::marker::UserMarker>> {
-        // Look for pattern: "shared by <@123456789>"
-        if let Some(start) = content.find("shared by <@") {
-            let user_mention = &content[start + 12..]; // Skip "shared by <@"
+        if let Some(start) = content.find("<@") {
+            let user_mention = &content[start + 2..];
             if let Some(end) = user_mention.find('>') {
                 let user_id_str = &user_mention[..end];
                 if let Ok(user_id) = user_id_str.parse::<u64>() {
