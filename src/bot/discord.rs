@@ -236,39 +236,25 @@ impl DiscordBot {
                     return Ok(());
                 }
 
-                // Check if the reaction was added by the message author or a server admin
-                if let Some(guild_id) = reaction.guild_id {
-                    // Get the message to extract the original author
-                    if let Ok(message) = self
-                        .http
-                        .message(reaction.channel_id, reaction.message_id)
-                        .await
-                    {
-                        if let Ok(message_model) = message.model().await {
-                            // Extract original user ID from message content (format: "shared by <@123456789>")
-                            let original_user_id =
-                                self.extract_original_user_from_content(&message_model.content);
+                // Check if the reaction was added by the message author
+                if let Ok(message) = self
+                    .http
+                    .message(reaction.channel_id, reaction.message_id)
+                    .await
+                {
+                    if let Ok(message_model) = message.model().await {
+                        // Extract original user ID from message content (format: "shared by <@123456789>")
+                        let original_user_id =
+                            self.extract_original_user_from_content(&message_model.content);
 
-                            let user_id = reaction.user_id;
-                            let can_delete = (original_user_id == Some(user_id))
-                                || self
-                                    .user_has_manage_messages_permission(
-                                        guild_id,
-                                        user_id,
-                                        reaction.channel_id,
-                                    )
-                                    .await
-                                    .unwrap_or(false);
-
-                            if can_delete {
-                                // Delete the message
-                                if let Err(e) = self
-                                    .http
-                                    .delete_message(reaction.channel_id, reaction.message_id)
-                                    .await
-                                {
-                                    error!("Failed to delete message: {}", e);
-                                }
+                        if original_user_id == Some(reaction.user_id) {
+                            // Delete the message
+                            if let Err(e) = self
+                                .http
+                                .delete_message(reaction.channel_id, reaction.message_id)
+                                .await
+                            {
+                                error!("Failed to delete message: {}", e);
                             }
                         }
                     }
@@ -616,41 +602,6 @@ impl DiscordBot {
         }
 
         Ok(())
-    }
-
-    async fn user_has_manage_messages_permission(
-        &self,
-        guild_id: twilight_model::id::Id<twilight_model::id::marker::GuildMarker>,
-        user_id: twilight_model::id::Id<twilight_model::id::marker::UserMarker>,
-        _channel_id: twilight_model::id::Id<twilight_model::id::marker::ChannelMarker>,
-    ) -> Result<bool> {
-        // Get the guild member to check their permissions
-        if let Ok(member) = self.http.guild_member(guild_id, user_id).await {
-            if let Ok(member_model) = member.model().await {
-                // Get guild to check roles
-                if let Ok(guild) = self.http.guild(guild_id).await {
-                    if let Ok(guild_model) = guild.model().await {
-                        // Check if user is guild owner
-                        if guild_model.owner_id == user_id {
-                            return Ok(true);
-                        }
-
-                        // Check roles for MANAGE_MESSAGES permission
-                        use twilight_model::guild::Permissions;
-                        for role_id in &member_model.roles {
-                            if let Some(role) = guild_model.roles.iter().find(|r| &r.id == role_id)
-                            {
-                                if role.permissions.contains(Permissions::MANAGE_MESSAGES) {
-                                    return Ok(true);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(false)
     }
 
     fn extract_original_user_from_content(
