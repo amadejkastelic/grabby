@@ -56,6 +56,9 @@
               settings.denyWarnings = true;
             };
           };
+          settings.rust.check.cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ./Cargo.lock;
+          };
         };
       in
       {
@@ -77,7 +80,6 @@
 
         checks = {
           pre-commit-check = pre-commit-check;
-          package = grabbyPkg;
         };
       }
     )

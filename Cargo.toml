@@ -16,10 +16,10 @@ twilight-cache-inmemory = "0.17"
 twilight-standby = "0.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-anyhow = "1.0.98"
-url = "2.5.4"
+anyhow = "1.0"
+url = "2.5"
 twilight-util = { version = "0.17", features = ["builder"] }
-async-trait = "0.1.88"
+async-trait = "0.1"
 clap = { version = "4.0", features = ["derive"] }
 dirs = "6.0"
 tempfile = "3.0"

@@ -1,29 +1,6 @@
 name: Checks
 
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**/*.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'flake.nix'
-      - 'flake.lock'
-      - 'nix/*.nix'
-      - '.github/workflows/*.yaml'
-      - '.github/workflows/*.yml'
-  pull_request:
-    paths:
-      - 'src/**/*.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'flake.nix'
-      - 'flake.lock'
-      - 'nix/*.nix'
-      - '.github/workflows/*.yaml'
-      - '.github/workflows/*.yml'
-  workflow_dispatch:
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   check:
@@ -35,3 +12,8 @@ jobs:
     uses: ./.github/workflows/nix.yaml
     with:
       command: ${{ matrix.command }}
+
+  build:
+    needs: check
+    uses: ./.github/workflows/build.yaml
+    secrets: inherit
