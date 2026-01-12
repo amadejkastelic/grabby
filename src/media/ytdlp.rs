@@ -38,6 +38,8 @@ impl YtDlpDownloader {
                 .arg("--dump-json")
                 .arg("--no-download")
                 .arg("--no-warnings")
+                .arg("--user-agent")
+                .arg("\"foobar\"")
                 .arg(url)
                 .output(),
         )
@@ -80,6 +82,8 @@ impl YtDlpDownloader {
                 .arg("mp4")
                 .arg("--no-warnings")
                 .arg("--quiet")
+                .arg("--user-agent")
+                .arg("\"foobar\"")
                 .arg(url)
                 .output(),
         )
