@@ -2,11 +2,13 @@ mod downloader;
 mod gallery_dl;
 mod resize;
 mod types;
+mod utils;
 mod ytdlp;
 
 pub use downloader::Downloader;
 pub use resize::{resize_image_file, resize_media_file};
 pub use types::MediaInfo;
+pub use utils::remux_ts_to_mp4;
 
 use anyhow::Result;
 use gallery_dl::GalleryDlDownloader;

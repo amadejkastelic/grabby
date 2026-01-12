@@ -1,5 +1,6 @@
 use super::{
     downloader::Downloader,
+    remux_ts_to_mp4,
     types::{MediaFile, MediaInfo, MediaMetadata},
 };
 use anyhow::{Context, Result};
@@ -68,8 +69,6 @@ impl YtDlpDownloader {
     ) -> Result<Vec<MediaFile>> {
         info!("Downloading media with yt-dlp: {}", metadata.id);
 
-        // Force H.264 codec for Discord Linux compatibility
-        // Try H.264 formats first (vcodec=h264 or starts with h264), fallback to best available
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             Command::new("yt-dlp")
@@ -80,6 +79,7 @@ impl YtDlpDownloader {
                 .arg("--merge-output-format")
                 .arg("mp4")
                 .arg("--no-warnings")
+                .arg("--quiet")
                 .arg(url)
                 .output(),
         )
@@ -87,17 +87,31 @@ impl YtDlpDownloader {
         .context("Media download timed out")?
         .context("Failed to download media")?;
 
-        let filename = format!("{}.{}", metadata.id, metadata.format_ext);
-
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!("Media download failed: {}", error));
         }
 
-        Ok(vec![MediaFile {
-            filename,
-            data: output.stdout,
-        }])
+        let filename = format!("{}.{}", metadata.id, metadata.format_ext);
+
+        info!(
+            "yt-dlp output size: {} bytes, first 4 bytes: {:02x} {:02x} {:02x} {:02x}",
+            output.stdout.len(),
+            output.stdout.first().unwrap_or(&0),
+            output.stdout.get(1).unwrap_or(&0),
+            output.stdout.get(2).unwrap_or(&0),
+            output.stdout.get(3).unwrap_or(&0)
+        );
+
+        let data = if output.stdout.len() > 2 && output.stdout.starts_with(&[0x47, 0x40]) {
+            info!("Detected MPEG-TS output, remuxing to MP4 with ffmpeg");
+            remux_ts_to_mp4(&output.stdout).await?
+        } else {
+            info!("Output appears to be MP4 or other format, no remuxing needed");
+            output.stdout
+        };
+
+        Ok(vec![MediaFile { filename, data }])
     }
 }
 

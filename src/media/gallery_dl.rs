@@ -68,6 +68,15 @@ impl GalleryDlDownloader {
         }
 
         debug!("Found {} media URLs", urls.len());
+
+        for url in &urls {
+            if url.starts_with("ytdl:") || url.starts_with("ytdl://") {
+                return Err(anyhow::anyhow!(
+                    "URL requires yt-dlp (ytdl prefix detected), delegating to yt-dlp downloader"
+                ));
+            }
+        }
+
         Ok((metadata, urls))
     }
 
@@ -327,6 +336,27 @@ mod tests {
         ])
     }
 
+    fn reddit_video_with_ytdl_json() -> Value {
+        serde_json::json!([
+            [2, {
+                "id": "abc123",
+                "title": "Test Reddit Video",
+                "author": "test_redditor",
+                "score": 1000,
+                "extension": "mp4",
+                "filename": "test_video"
+            }],
+            [3, "ytdl:https://v.redd.it/abc123/DASHPlaylist.mpd", {
+                "id": "abc123",
+                "title": "Test Reddit Video",
+                "author": "test_redditor",
+                "score": 1000,
+                "extension": "mp4",
+                "filename": "test_video"
+            }]
+        ])
+    }
+
     #[test]
     fn test_parse_twitter_tweet_json() {
         let json = twitter_tweet_json();
@@ -374,6 +404,15 @@ mod tests {
         assert_eq!(metadata.likes, Some(2500));
         assert_eq!(metadata.format_ext, "png");
         assert_eq!(urls.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_reddit_video_with_ytdl_returns_error() {
+        let json = reddit_video_with_ytdl_json();
+        let result = GalleryDlDownloader::parse_json(&json);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("yt-dlp"));
     }
 
     #[test]
