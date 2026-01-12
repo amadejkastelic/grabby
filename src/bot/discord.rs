@@ -1,6 +1,7 @@
 use crate::{config::ConfigManager, media::MediaDownloader};
 use anyhow::{Context, Result};
 use std::env;
+use std::sync::Arc;
 use tokio::join;
 use tracing::{debug, error, info, warn};
 use twilight_cache_inmemory::InMemoryCache;
@@ -20,7 +21,10 @@ use twilight_model::{
         attachment::Attachment,
         interaction::{InteractionResponse, InteractionResponseType},
     },
-    id::{marker::ChannelMarker, Id},
+    id::{
+        marker::{ApplicationMarker, ChannelMarker, UserMarker},
+        Id,
+    },
 };
 use twilight_util::builder::command::{BooleanBuilder, CommandBuilder, StringBuilder};
 
@@ -42,63 +46,58 @@ fn clean_error_message(error: &anyhow::Error) -> String {
     "Download failed".to_string()
 }
 
+#[derive(Clone)]
 pub struct DiscordBot {
-    http: HttpClient,
-    cache: InMemoryCache,
-    shard: Shard,
-    media_downloader: MediaDownloader,
-    config: ConfigManager,
-    application_id: Id<twilight_model::id::marker::ApplicationMarker>,
-    user_id: Id<twilight_model::id::marker::UserMarker>,
+    http: Arc<HttpClient>,
+    cache: Arc<InMemoryCache>,
+    media_downloader: Arc<MediaDownloader>,
+    config: Arc<ConfigManager>,
+    application_id: Id<ApplicationMarker>,
+    user_id: Id<UserMarker>,
 }
 
 impl DiscordBot {
-    pub async fn new(token: String) -> Result<Self> {
+    pub async fn new(token: String) -> Result<(Self, Shard)> {
         Self::new_with_config(token, ConfigManager::new()).await
     }
 
-    pub async fn new_with_config(token: String, config: ConfigManager) -> Result<Self> {
-        let http = HttpClient::new(token.clone());
-        let cache = InMemoryCache::new();
+    pub async fn new_with_config(token: String, config: ConfigManager) -> Result<(Self, Shard)> {
+        let http = Arc::new(HttpClient::new(token.clone()));
+        let cache = Arc::new(InMemoryCache::new());
 
         let intents =
             Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT | Intents::GUILD_MESSAGE_REACTIONS;
         let shard = Shard::new(ShardId::ONE, token, intents);
 
         let media_downloader =
-            MediaDownloader::new().context("Failed to initialize media downloader")?;
+            Arc::new(MediaDownloader::new().context("Failed to initialize media downloader")?);
 
-        // Test the media downloader setup
         if let Err(e) = media_downloader.test_setup().await {
             warn!("Media downloader test failed: {}", e);
         }
 
-        // Get application ID
         let application_id = {
             let response = http.current_user_application().await?;
             response.model().await?.id
         };
 
-        // Get bot user ID
         let user_id = {
             let response = http.current_user().await?;
             response.model().await?.id
         };
 
         let bot = Self {
-            http,
+            http: http.clone(),
             cache,
-            shard,
-            media_downloader,
-            config,
+            media_downloader: media_downloader.clone(),
+            config: Arc::new(config),
             application_id,
             user_id,
         };
 
-        // Register slash commands
         bot.register_commands().await?;
 
-        Ok(bot)
+        Ok((bot, shard))
     }
 
     async fn register_commands(&self) -> Result<()> {
@@ -127,12 +126,11 @@ impl DiscordBot {
         Ok(())
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(self, mut shard: Shard) -> Result<()> {
         info!("Discord bot starting...");
 
         loop {
-            let event = match self
-                .shard
+            let event = match shard
                 .next_event(twilight_gateway::EventTypeFlags::all())
                 .await
             {
@@ -151,13 +149,31 @@ impl DiscordBot {
 
             match event {
                 Event::MessageCreate(msg) => {
-                    self.handle_message(&msg).await?;
+                    let bot = self.clone();
+                    let msg = msg.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = bot.handle_message(&msg).await {
+                            error!("Error handling message: {}", e);
+                        }
+                    });
                 }
                 Event::InteractionCreate(interaction) => {
-                    self.handle_interaction(&interaction).await?;
+                    let bot = self.clone();
+                    let interaction = interaction.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = bot.handle_interaction(&interaction).await {
+                            error!("Error handling interaction: {}", e);
+                        }
+                    });
                 }
                 Event::ReactionAdd(reaction) => {
-                    self.handle_reaction_add(&reaction).await?;
+                    let bot = self.clone();
+                    let reaction = reaction.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = bot.handle_reaction_add(&reaction).await {
+                            error!("Error handling reaction add: {}", e);
+                        }
+                    });
                 }
                 Event::Ready(_) => {
                     info!("Discord bot is ready!");
@@ -637,15 +653,15 @@ impl DiscordBot {
 pub async fn run() -> Result<()> {
     let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN environment variable is required");
 
-    let bot = DiscordBot::new(token).await?;
-    bot.run().await
+    let (bot, shard) = DiscordBot::new(token).await?;
+    bot.run(shard).await
 }
 
 pub async fn run_with_config(config: ConfigManager) -> Result<()> {
     let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN environment variable is required");
 
-    let bot = DiscordBot::new_with_config(token, config).await?;
-    bot.run().await
+    let (bot, shard) = DiscordBot::new_with_config(token, config).await?;
+    bot.run(shard).await
 }
 
 struct EmbedCommandOptions {
