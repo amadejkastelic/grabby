@@ -443,9 +443,9 @@ impl DiscordBot {
                 continue;
             }
 
-            // Discord has a 25MB file size limit for most servers
+            // Discord has a 10MB file size limit for most servers
             #[allow(unused_variables)]
-            let (file_data, file_size) = if file_size > 25_000_000 {
+            let (file_data, file_size) = if file_size > 10_000_000 {
                 info!(
                     "File {} is too large ({} MB), attempting to resize",
                     file.filename,
@@ -461,9 +461,9 @@ impl DiscordBot {
                     let file_name = file.filename.clone();
                     move || {
                         if is_video {
-                            crate::media::resize_media_file(&file_data, &file_name, 25)
+                            crate::media::resize_media_file(&file_data, &file_name, 10)
                         } else {
-                            crate::media::resize_image_file(&file_data, &file_name, 25)
+                            crate::media::resize_image_file(&file_data, &file_name, 10)
                         }
                     }
                 })
@@ -520,7 +520,7 @@ impl DiscordBot {
             self.http
                 .create_message(*channel_id)
                 .content(&format!(
-                    "❌ {} - All files too large. Discord limit is 25MB.\nOversized files: {}",
+                    "❌ {} - All files too large. Discord limit is 10MB.\nOversized files: {}",
                     media_info.url, oversized_list
                 ))
                 .await?;
