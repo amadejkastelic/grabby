@@ -252,6 +252,11 @@ impl DiscordBot {
                     return Ok(());
                 }
 
+                // Skip if the message was not posted by the bot user
+                if reaction.message_author_id != Some(self.user_id) {
+                    return Ok(());
+                }
+
                 // Check if the reaction was added by the message author
                 if let Ok(message) = self
                     .http
