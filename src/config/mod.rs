@@ -8,6 +8,8 @@ pub struct ServerConfig {
     pub server_id: String,
     pub auto_embed_channels: HashSet<String>,
     pub embed_enabled: bool,
+    #[serde(default)]
+    pub disabled_domains: HashSet<String>,
 }
 
 impl Default for ServerConfig {
@@ -16,6 +18,7 @@ impl Default for ServerConfig {
             server_id: String::new(),
             auto_embed_channels: HashSet::new(),
             embed_enabled: true,
+            disabled_domains: HashSet::new(),
         }
     }
 }
@@ -26,11 +29,54 @@ impl ServerConfig {
             server_id: server_id.to_string(),
             auto_embed_channels: HashSet::new(),
             embed_enabled: true,
+            disabled_domains: HashSet::new(),
         }
     }
 
     pub fn is_auto_embed_channel(&self, channel_id: &str) -> bool {
         self.auto_embed_channels.iter().any(|id| id == channel_id)
+    }
+
+    pub fn is_domain_disabled(&self, url: &str) -> bool {
+        if self.disabled_domains.is_empty() {
+            return false;
+        }
+
+        if let Some(host) = Self::extract_host(url) {
+            let host_lower = host.to_lowercase();
+
+            for disabled in &self.disabled_domains {
+                let disabled_lower = disabled.to_lowercase();
+
+                // Exact match
+                if host_lower == disabled_lower {
+                    return true;
+                }
+
+                // Subdomain match (e.g., if "example.com" is disabled, "sub.example.com" is also disabled)
+                if host_lower.ends_with(&format!(".{}", disabled_lower)) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn extract_host(url: &str) -> Option<String> {
+        let without_protocol = if let Some(pos) = url.find("://") {
+            &url[pos + 3..]
+        } else {
+            url
+        };
+
+        let host = without_protocol.split('/').next()?.split(':').next()?;
+
+        if host.is_empty() {
+            None
+        } else {
+            Some(host.to_string())
+        }
     }
 }
 
@@ -110,11 +156,6 @@ impl ConfigManager {
             .get(server_id)
             .cloned()
             .unwrap_or_else(|| ServerConfig::new(server_id))
-    }
-
-    pub fn is_auto_embed_channel(&self, guild_id: &str, channel_id: &str) -> bool {
-        self.get_server_config(guild_id)
-            .is_auto_embed_channel(channel_id)
     }
 }
 
@@ -413,44 +454,75 @@ mod tests {
     }
 
     #[test]
-    fn test_config_manager_is_auto_embed_channel_true() {
-        let toml_content = r#"
-            [[servers]]
-            server_id = "guild1"
-            auto_embed_channels = ["channel1", "channel2"]
-            embed_enabled = true
-        "#;
-
-        let temp_file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp_file.path(), toml_content).unwrap();
-
-        let manager = ConfigManager::from_config_file(temp_file.path()).unwrap();
-
-        assert!(manager.is_auto_embed_channel("guild1", "channel1"));
-        assert!(manager.is_auto_embed_channel("guild1", "channel2"));
+    fn test_is_domain_disabled_empty() {
+        let config = ServerConfig::new("test_server");
+        assert!(!config.is_domain_disabled("https://example.com"));
     }
 
     #[test]
-    fn test_config_manager_is_auto_embed_channel_false() {
+    fn test_is_domain_disabled_exact_match() {
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_disabled("https://example.com"));
+        assert!(config.is_domain_disabled("http://example.com"));
+        assert!(config.is_domain_disabled("https://example.com/path"));
+    }
+
+    #[test]
+    fn test_is_domain_disabled_subdomain() {
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_disabled("https://sub.example.com"));
+        assert!(config.is_domain_disabled("https://deep.sub.example.com"));
+        assert!(!config.is_domain_disabled("https://example.com.au"));
+    }
+
+    #[test]
+    fn test_is_domain_disabled_case_insensitive() {
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("EXAMPLE.COM".to_string());
+
+        assert!(config.is_domain_disabled("https://example.com"));
+        assert!(config.is_domain_disabled("https://Example.Com"));
+        assert!(config.is_domain_disabled("https://SUB.example.com"));
+    }
+
+    #[test]
+    fn test_is_domain_disabled_not_disabled() {
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("example.com".to_string());
+
+        assert!(!config.is_domain_disabled("https://other.com"));
+        assert!(!config.is_domain_disabled("https://notexample.com"));
+    }
+
+    #[test]
+    fn test_is_domain_disabled_with_port() {
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_disabled("https://example.com:8080"));
+        assert!(config.is_domain_disabled("http://example.com:3000/path"));
+    }
+
+    #[test]
+    fn test_config_from_file_with_disabled_domains() {
         let toml_content = r#"
             [[servers]]
-            server_id = "guild1"
+            server_id = "server1"
             auto_embed_channels = ["channel1"]
             embed_enabled = true
+            disabled_domains = ["example.com", "test.org"]
         "#;
 
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(temp_file.path(), toml_content).unwrap();
 
-        let manager = ConfigManager::from_config_file(temp_file.path()).unwrap();
-
-        assert!(!manager.is_auto_embed_channel("guild1", "channel2"));
-        assert!(!manager.is_auto_embed_channel("guild2", "channel1"));
-    }
-
-    #[test]
-    fn test_config_manager_is_auto_embed_channel_default_guild() {
-        let manager = ConfigManager::new();
-        assert!(!manager.is_auto_embed_channel("any_guild", "any_channel"));
+        let config = Config::from_file(temp_file.path()).unwrap();
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers[0].disabled_domains.contains("example.com"));
+        assert!(config.servers[0].disabled_domains.contains("test.org"));
     }
 }

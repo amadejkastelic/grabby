@@ -24,6 +24,8 @@ auto_embed_channels = [
   "CHANNEL_ID_2"
 ]
 embed_enabled = true
+# Domains to skip in auto-embed channels (slash command still works)
+disabled_domains = ["example.com", "another-site.org"]
 
 # Add more servers by repeating the [[servers]] section
 # [[servers]]

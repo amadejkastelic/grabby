@@ -17,6 +17,7 @@ let
       server_id = server.serverId;
       auto_embed_channels = server.autoEmbedChannels;
       embed_enabled = server.embedEnabled;
+      disabled_domains = server.disabledDomains;
     }) cfg.servers;
   };
 in
@@ -74,6 +75,16 @@ in
               default = true;
               description = "Enable embed for this server";
             };
+
+            disabledDomains = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "List of domains to skip in auto-embed channels (slash command still works)";
+              example = [
+                "example.com"
+                "another-site.org"
+              ];
+            };
           };
         }
       );
@@ -88,6 +99,10 @@ in
             "channel2"
           ];
           embedEnabled = true;
+          disabledDomains = [
+            "example.com"
+            "another-site.org"
+          ];
         }
       ];
     };

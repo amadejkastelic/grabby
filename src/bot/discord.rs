@@ -191,11 +191,15 @@ impl DiscordBot {
 
         // Check if this is an auto-embed channel
         if let Some(guild_id) = msg.guild_id {
-            if self
-                .config
-                .is_auto_embed_channel(&guild_id.to_string(), &msg.channel_id.to_string())
-            {
+            let server_config = self.config.get_server_config(&guild_id.to_string());
+            if server_config.is_auto_embed_channel(&msg.channel_id.to_string()) {
                 for url in self.extract_urls(&msg.content) {
+                    // Skip disabled domains silently
+                    if server_config.is_domain_disabled(&url) {
+                        info!("Skipping disabled domain in auto-embed channel: {}", url);
+                        continue;
+                    }
+
                     if self.media_downloader.is_supported_url(&url) {
                         match self.media_downloader.download(&url).await {
                             Ok(media_info) => {
