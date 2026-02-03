@@ -237,7 +237,10 @@ impl DiscordBot {
                                     let _ = self
                                         .http
                                         .create_message(msg.channel_id)
-                                        .content(&transformed_url)
+                                        .content(&format!(
+                                            "<@{}> {}",
+                                            msg.author.id, transformed_url
+                                        ))
                                         .await;
                                     let _ = self.http.delete_message(msg.channel_id, msg.id).await;
                                 } else {
