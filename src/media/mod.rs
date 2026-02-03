@@ -15,6 +15,21 @@ use gallery_dl::GalleryDlDownloader;
 use tracing::{info, warn};
 use ytdlp::YtDlpDownloader;
 
+const URL_TRANSFORMS: &[(&str, &str)] = &[
+    ("instagram.com", "kkinstagram.com"),
+    ("instagr.am", "kkinstagram.com"),
+];
+
+pub fn get_transformed_url(url: &str) -> Option<String> {
+    let url_lower = url.to_lowercase();
+    for (pattern, replacement) in URL_TRANSFORMS {
+        if url_lower.contains(pattern) {
+            return Some(url.replace(pattern, replacement));
+        }
+    }
+    None
+}
+
 pub struct MediaDownloader {
     downloaders: Vec<Box<dyn Downloader>>,
 }
@@ -57,6 +72,10 @@ impl MediaDownloader {
             "Media download failed: {}",
             errors.join(". ")
         ))
+    }
+
+    pub fn get_transformed_url(&self, url: &str) -> Option<String> {
+        get_transformed_url(url)
     }
 
     pub fn is_supported_url(&self, _url: &str) -> bool {

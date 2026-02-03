@@ -226,16 +226,32 @@ impl DiscordBot {
                                 }
                             }
                             Err(e) => {
-                                let cleaned_error = clean_error_message(&e);
-                                let error_msg =
-                                    format!("Failed to download media: `{}`", cleaned_error);
-                                let _ = self
-                                    .http
-                                    .create_message(msg.channel_id)
-                                    .content(&error_msg)
-                                    .reply(msg.id)
-                                    .await;
-                                error!("Failed to download media from {}: {}", url, e);
+                                // Check if URL can be transformed (e.g., Instagram -> kkinstagram)
+                                if let Some(transformed_url) =
+                                    self.media_downloader.get_transformed_url(&url)
+                                {
+                                    info!(
+                                        "Download failed, sending transformed URL: {}",
+                                        transformed_url
+                                    );
+                                    let _ = self
+                                        .http
+                                        .create_message(msg.channel_id)
+                                        .content(&transformed_url)
+                                        .await;
+                                    let _ = self.http.delete_message(msg.channel_id, msg.id).await;
+                                } else {
+                                    let cleaned_error = clean_error_message(&e);
+                                    let error_msg =
+                                        format!("Failed to download media: `{}`", cleaned_error);
+                                    let _ = self
+                                        .http
+                                        .create_message(msg.channel_id)
+                                        .content(&error_msg)
+                                        .reply(msg.id)
+                                        .await;
+                                    error!("Failed to download media from {}: {}", url, e);
+                                }
                             }
                         }
                         break; // Only process the first supported URL
