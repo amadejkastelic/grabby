@@ -18,6 +18,10 @@ use ytdlp::YtDlpDownloader;
 const URL_TRANSFORMS: &[(&str, &str)] = &[
     ("instagram.com", "kkinstagram.com"),
     ("instagr.am", "kkinstagram.com"),
+    ("tiktok.com", "fxtiktok.com"),
+    ("x.com", "fxtwitter.com"),
+    ("twitter.com", "fxtwitter.com"),
+    ("reddit.com", "vxreddit.com"),
 ];
 
 pub fn get_transformed_url(url: &str) -> Option<String> {

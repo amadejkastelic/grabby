@@ -404,17 +404,15 @@ impl DiscordBot {
                 }
             }
             Err(e) => {
-                let cleaned_error = clean_error_message(&e);
                 error!("Failed to download media from {}: {}", options.url, e);
-                let _ = self
-                    .followup_message(
-                        interaction,
-                        &format!(
-                            "Failed to download media: {}\n{}",
-                            cleaned_error, options.url
-                        ),
-                    )
-                    .await;
+                let message = if let Some(transformed_url) =
+                    self.media_downloader.get_transformed_url(&options.url)
+                {
+                    transformed_url
+                } else {
+                    options.url.clone()
+                };
+                let _ = self.followup_message(interaction, &message).await;
             }
         }
 
@@ -553,21 +551,13 @@ impl DiscordBot {
             attachments.push(attachment);
         }
 
-        // If all files are oversized, send error message
+        // If all files are oversized, send transformed URL or original URL
         if attachments.is_empty() && !oversized_files.is_empty() {
-            let oversized_list = oversized_files
-                .iter()
-                .map(|(name, size)| format!("{} ({:.1}MB)", name, *size as f64 / 1_000_000.0))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            self.http
-                .create_message(*channel_id)
-                .content(&format!(
-                    "❌ {} - All files too large. Discord limit is 10MB.\nOversized files: {}",
-                    media_info.url, oversized_list
-                ))
-                .await?;
+            let url = self
+                .media_downloader
+                .get_transformed_url(&media_info.url)
+                .unwrap_or_else(|| media_info.url.clone());
+            self.http.create_message(*channel_id).content(&url).await?;
             return Ok(());
         }
 
