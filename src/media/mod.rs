@@ -25,10 +25,13 @@ const URL_TRANSFORMS: &[(&str, &str)] = &[
 ];
 
 pub fn get_transformed_url(url: &str) -> Option<String> {
-    let url_lower = url.to_lowercase();
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_lowercase();
     for (pattern, replacement) in URL_TRANSFORMS {
-        if url_lower.contains(pattern) {
-            return Some(url.replace(pattern, replacement));
+        if host == *pattern || host.ends_with(&format!(".{pattern}")) {
+            let mut new_url = parsed.clone();
+            new_url.set_host(Some(replacement)).ok()?;
+            return Some(new_url.to_string());
         }
     }
     None
@@ -124,5 +127,116 @@ mod tests {
         assert!(downloader.is_supported_url("https://x.com/user/status/123"));
         assert!(downloader.is_supported_url("https://youtube.com/watch?v=123"));
         assert!(downloader.is_supported_url(""));
+    }
+
+    #[test]
+    fn test_transform_reddit_basic() {
+        assert_eq!(
+            get_transformed_url("https://reddit.com/r/test/comments/abc/"),
+            Some("https://vxreddit.com/r/test/comments/abc/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_reddit_old_subdomain() {
+        assert_eq!(
+            get_transformed_url("https://old.reddit.com/r/test/comments/abc/"),
+            Some("https://vxreddit.com/r/test/comments/abc/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_reddit_www_subdomain() {
+        assert_eq!(
+            get_transformed_url("https://www.reddit.com/r/test/comments/abc/"),
+            Some("https://vxreddit.com/r/test/comments/abc/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_tiktok_basic() {
+        assert_eq!(
+            get_transformed_url("https://www.tiktok.com/@user/video/123"),
+            Some("https://fxtiktok.com/@user/video/123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_tiktok_vm_subdomain() {
+        assert_eq!(
+            get_transformed_url("https://vm.tiktok.com/ZMhAbCdEf/"),
+            Some("https://fxtiktok.com/ZMhAbCdEf/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_x_to_fxtwitter() {
+        assert_eq!(
+            get_transformed_url("https://x.com/user/status/123456"),
+            Some("https://fxtwitter.com/user/status/123456".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_twitter_to_fxtwitter() {
+        assert_eq!(
+            get_transformed_url("https://twitter.com/user/status/123456"),
+            Some("https://fxtwitter.com/user/status/123456".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_twitter_www() {
+        assert_eq!(
+            get_transformed_url("https://www.twitter.com/user/status/123456"),
+            Some("https://fxtwitter.com/user/status/123456".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_instagram() {
+        assert_eq!(
+            get_transformed_url("https://www.instagram.com/p/ABC123/"),
+            Some("https://kkinstagram.com/p/ABC123/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_instagram_short() {
+        assert_eq!(
+            get_transformed_url("https://instagr.am/p/ABC123/"),
+            Some("https://kkinstagram.com/p/ABC123/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_no_match() {
+        assert_eq!(get_transformed_url("https://example.com/video.mp4"), None);
+    }
+
+    #[test]
+    fn test_transform_preserves_query() {
+        assert_eq!(
+            get_transformed_url("https://reddit.com/r/test?t=all&sort=new"),
+            Some("https://vxreddit.com/r/test?t=all&sort=new".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_case_insensitive() {
+        assert_eq!(
+            get_transformed_url("https://OLD.REDDIT.COM/r/test/"),
+            Some("https://vxreddit.com/r/test/".to_string())
+        );
+        assert_eq!(
+            get_transformed_url("https://VM.TikTok.com/ZMhAbCdEf/"),
+            Some("https://fxtiktok.com/ZMhAbCdEf/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_invalid_url() {
+        assert_eq!(get_transformed_url("not-a-url"), None);
+        assert_eq!(get_transformed_url(""), None);
     }
 }
