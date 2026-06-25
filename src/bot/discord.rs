@@ -73,7 +73,7 @@ impl DiscordBot {
             Arc::new(MediaDownloader::new().context("Failed to initialize media downloader")?);
 
         if let Err(e) = media_downloader.test_setup().await {
-            warn!("Media downloader test failed: {}", e);
+            warn!(error = %e, "Media downloader test failed");
         }
 
         let application_id = {
@@ -153,7 +153,7 @@ impl DiscordBot {
                     let msg = msg.clone();
                     tokio::spawn(async move {
                         if let Err(e) = bot.handle_message(&msg).await {
-                            error!("Error handling message: {}", e);
+                            error!(error = %e, "Error handling message");
                         }
                     });
                 }
@@ -162,7 +162,7 @@ impl DiscordBot {
                     let interaction = interaction.clone();
                     tokio::spawn(async move {
                         if let Err(e) = bot.handle_interaction(&interaction).await {
-                            error!("Error handling interaction: {}", e);
+                            error!(error = %e, "Error handling interaction");
                         }
                     });
                 }
@@ -171,7 +171,7 @@ impl DiscordBot {
                     let reaction = reaction.clone();
                     tokio::spawn(async move {
                         if let Err(e) = bot.handle_reaction_add(&reaction).await {
-                            error!("Error handling reaction add: {}", e);
+                            error!(error = %e, "Error handling reaction add");
                         }
                     });
                 }
@@ -196,14 +196,28 @@ impl DiscordBot {
                 for url in self.extract_urls(&msg.content) {
                     // Skip disabled domains silently
                     if server_config.is_domain_disabled(&url) {
-                        info!("Skipping disabled domain in auto-embed channel: {}", url);
+                        info!(
+                            user_id = %msg.author.id,
+                            channel_id = %msg.channel_id,
+                            guild_id = ?msg.guild_id,
+                            url = %url,
+                            "Skipping disabled domain in auto-embed channel"
+                        );
                         continue;
                     }
 
                     if self.media_downloader.is_supported_url(&url) {
                         match self.media_downloader.download(&url).await {
                             Ok(media_info) => {
-                                info!("Downloaded media: {}", media_info.metadata.title);
+                                info!(
+                                    user_id = %msg.author.id,
+                                    channel_id = %msg.channel_id,
+                                    guild_id = ?msg.guild_id,
+                                    url = %url,
+                                    title = %media_info.metadata.title,
+                                    file_count = media_info.files.len(),
+                                    "Downloaded media"
+                                );
                                 if let Err(e) = self
                                     .send_media_to_channel(
                                         &msg.channel_id,
@@ -220,7 +234,14 @@ impl DiscordBot {
                                         .create_message(msg.channel_id)
                                         .content(&error_msg)
                                         .await;
-                                    error!("Failed to send media to channel: {}", e);
+                                    error!(
+                                        user_id = %msg.author.id,
+                                        channel_id = %msg.channel_id,
+                                        message_id = %msg.id,
+                                        url = %url,
+                                        error = %e,
+                                        "Failed to send media to channel"
+                                    );
                                 } else {
                                     let _ = self.http.delete_message(msg.channel_id, msg.id).await;
                                 }
@@ -231,8 +252,12 @@ impl DiscordBot {
                                     self.media_downloader.get_transformed_url(&url)
                                 {
                                     info!(
-                                        "Download failed, sending transformed URL: {}",
-                                        transformed_url
+                                        user_id = %msg.author.id,
+                                        channel_id = %msg.channel_id,
+                                        guild_id = ?msg.guild_id,
+                                        url = %url,
+                                        transformed_url = %transformed_url,
+                                        "Download failed, sending transformed URL"
                                     );
                                     let _ = self
                                         .http
@@ -253,7 +278,14 @@ impl DiscordBot {
                                         .content(&error_msg)
                                         .reply(msg.id)
                                         .await;
-                                    error!("Failed to download media from {}: {}", url, e);
+                                    error!(
+                                        user_id = %msg.author.id,
+                                        channel_id = %msg.channel_id,
+                                        guild_id = ?msg.guild_id,
+                                        url = %url,
+                                        error = %e,
+                                        "Failed to download media"
+                                    );
                                 }
                             }
                         }
@@ -298,7 +330,14 @@ impl DiscordBot {
                                 .delete_message(reaction.channel_id, reaction.message_id)
                                 .await
                             {
-                                error!("Failed to delete message: {}", e);
+                                error!(
+                                    reactor_id = %reaction.user_id,
+                                    channel_id = %reaction.channel_id,
+                                    message_id = %reaction.message_id,
+                                    original_author_id = ?original_user_id,
+                                    error = %e,
+                                    "Failed to delete message via reaction"
+                                );
                             }
                         }
                     }
@@ -319,7 +358,14 @@ impl DiscordBot {
                             self.handle_embed_command(interaction, data).await?;
                         }
                         _ => {
-                            info!("Unknown command: {}", data.name);
+                            info!(
+                                command = %data.name,
+                                user_id = ?interaction.author_id(),
+                                channel_id = ?interaction.channel.as_ref().map(|c| c.id),
+                                guild_id = ?interaction.guild_id,
+                                interaction_id = %interaction.id,
+                                "Unknown command"
+                            );
                         }
                     }
                 }
@@ -361,14 +407,27 @@ impl DiscordBot {
         // Process the download result
         match download_result {
             Ok(media_info) => {
-                info!("Successfully downloaded: {}", media_info.metadata.title);
+                info!(
+                    user_id = ?interaction.author_id(),
+                    channel_id = ?interaction.channel.as_ref().map(|c| c.id),
+                    guild_id = ?interaction.guild_id,
+                    url = %options.url,
+                    title = %media_info.metadata.title,
+                    file_count = media_info.files.len(),
+                    "Successfully downloaded media"
+                );
 
                 if !media_info.files.is_empty() {
                     // Use the working channel upload method instead of interaction followup
                     let channel_id = match interaction.channel.as_ref() {
                         Some(channel) => channel.id,
                         None => {
-                            error!("No channel information in interaction");
+                            error!(
+                                user_id = ?interaction.author_id(),
+                                guild_id = ?interaction.guild_id,
+                                interaction_id = %interaction.id,
+                                "No channel information in interaction"
+                            );
                             let _ = self
                                 .followup_message(
                                     interaction,
@@ -392,7 +451,13 @@ impl DiscordBot {
                         )
                         .await
                     {
-                        error!("Failed to send media to channel: {}", e);
+                        error!(
+                            user_id = ?user_id,
+                            channel_id = %channel_id,
+                            url = %options.url,
+                            error = %e,
+                            "Failed to send media to channel"
+                        );
                         let _ = self
                             .followup_message(interaction, "Failed to send media file")
                             .await;
@@ -404,7 +469,14 @@ impl DiscordBot {
                 }
             }
             Err(e) => {
-                error!("Failed to download media from {}: {}", options.url, e);
+                error!(
+                    user_id = ?interaction.author_id(),
+                    channel_id = ?interaction.channel.as_ref().map(|c| c.id),
+                    guild_id = ?interaction.guild_id,
+                    url = %options.url,
+                    error = %e,
+                    "Failed to download media"
+                );
                 let message = if let Some(transformed_url) =
                     self.media_downloader.get_transformed_url(&options.url)
                 {
@@ -475,13 +547,19 @@ impl DiscordBot {
             let file_size = file.data.len() as u64;
 
             debug!(
-                "Processing file: {} (size: {} bytes)",
-                file.filename, file_size
+                channel_id = %channel_id,
+                file_name = %file.filename,
+                file_size = file_size,
+                "Processing file"
             );
 
             // Skip empty files
             if file_size == 0 {
-                warn!("Skipping empty file: {}", file.filename);
+                warn!(
+                    channel_id = %channel_id,
+                    file_name = %file.filename,
+                    "Skipping empty file"
+                );
                 continue;
             }
 
@@ -489,9 +567,11 @@ impl DiscordBot {
             #[allow(unused_variables)]
             let (file_data, file_size) = if file_size > 10_000_000 {
                 info!(
-                    "File {} is too large ({} MB), attempting to resize",
-                    file.filename,
-                    file_size as f64 / 1_000_000.0
+                    channel_id = %channel_id,
+                    file_name = %file.filename,
+                    file_size = file_size,
+                    max_size_mb = 10u64,
+                    "File exceeds size limit, attempting to resize"
                 );
 
                 let is_video = file.filename.ends_with(".mp4")
@@ -514,23 +594,31 @@ impl DiscordBot {
                 match resize_result {
                     Ok(Ok(resized_data)) => {
                         info!(
-                            "Successfully resized {} from {} to {} bytes",
-                            file.filename,
-                            file_size,
-                            resized_data.len()
+                            channel_id = %channel_id,
+                            file_name = %file.filename,
+                            original_size = file_size,
+                            new_size = resized_data.len() as u64,
+                            "Successfully resized file"
                         );
                         (resized_data.clone(), resized_data.len() as u64)
                     }
                     Ok(Err(e)) => {
                         warn!(
-                            "Failed to resize {}: {}, marking as oversized",
-                            file.filename, e
+                            channel_id = %channel_id,
+                            file_name = %file.filename,
+                            error = %e,
+                            "Failed to resize file, marking as oversized"
                         );
                         oversized_files.push((file.filename.clone(), file_size));
                         continue;
                     }
                     Err(e) => {
-                        warn!("Resize task failed for {}: {}", file.filename, e);
+                        warn!(
+                            channel_id = %channel_id,
+                            file_name = %file.filename,
+                            error = %e,
+                            "Resize task failed"
+                        );
                         oversized_files.push((file.filename.clone(), file_size));
                         continue;
                     }
@@ -609,10 +697,15 @@ impl DiscordBot {
         }
 
         // Send message with multiple attachments
-        debug!("Sending message with {} attachments", attachments.len());
         debug!(
-            "Attachment filenames: {:?}",
-            attachments.iter().map(|a| &a.filename).collect::<Vec<_>>()
+            channel_id = %channel_id,
+            attachment_count = attachments.len(),
+            "Sending message with attachments"
+        );
+        debug!(
+            channel_id = %channel_id,
+            filenames = ?attachments.iter().map(|a| &a.filename).collect::<Vec<_>>(),
+            "Attachment filenames"
         );
 
         let message = self

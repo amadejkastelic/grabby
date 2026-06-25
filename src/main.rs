@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
     info!("Starting Grabby...");
 
     if let Some(config_path) = get_config_path(&args) {
-        info!("Loading config from: {}", config_path);
+        info!(config_path = %config_path, "Loading config");
         let config_file = crate::config::Config::from_file(&config_path)
             .with_context(|| format!("Failed to load config from {}", config_path))?;
         let config = crate::config::ConfigManager::from_config_file(&config_path)

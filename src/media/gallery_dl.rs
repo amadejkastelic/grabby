@@ -67,7 +67,7 @@ impl GalleryDlDownloader {
             return Err(anyhow::anyhow!("No media URLs found"));
         }
 
-        debug!("Found {} media URLs", urls.len());
+        debug!(url_count = urls.len(), "Found media URLs");
 
         for url in &urls {
             if url.starts_with("ytdl:") || url.starts_with("ytdl://") {
@@ -82,8 +82,8 @@ impl GalleryDlDownloader {
 
     async fn extract_metadata_and_urls(&self, url: &str) -> Result<(MediaMetadata, Vec<String>)> {
         debug!(
-            "Extracting metadata with gallery-dl (resolving redirects) for: {}",
-            url
+            url = %url,
+            "Extracting metadata with gallery-dl (resolving redirects)"
         );
 
         let output = tokio::time::timeout(
@@ -106,7 +106,7 @@ impl GalleryDlDownloader {
         }
 
         let json_str = String::from_utf8_lossy(&output.stdout);
-        debug!("gallery-dl raw JSON output (resolved): {}", json_str);
+        debug!(url = %url, json = %json_str, "gallery-dl raw JSON output (resolved)");
 
         let json_array: Value =
             serde_json::from_str(&json_str).context("Failed to parse media metadata")?;
@@ -120,7 +120,7 @@ impl GalleryDlDownloader {
         index: usize,
         metadata: &MediaMetadata,
     ) -> Result<MediaFile> {
-        debug!("Downloading URL to memory: {}", url);
+        debug!(url = %url, index = index, "Downloading URL to memory");
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
@@ -207,14 +207,15 @@ impl Downloader for GalleryDlDownloader {
     }
 
     async fn download(&self, url: &str) -> Result<MediaInfo> {
-        info!("Starting gallery-dl download for: {}", url);
-        debug!("Extracting metadata and URLs...");
+        info!(url = %url, "Starting gallery-dl download");
+        debug!(url = %url, "Extracting metadata and URLs");
         let (metadata, media_urls) = self.extract_metadata_and_urls(url).await?;
 
         info!(
-            "Downloading {} media files with gallery-dl: {}",
-            media_urls.len(),
-            metadata.id
+            url = %url,
+            media_id = %metadata.id,
+            media_url_count = media_urls.len(),
+            "Downloading media files with gallery-dl"
         );
 
         let mut files = Vec::new();
@@ -224,7 +225,7 @@ impl Downloader for GalleryDlDownloader {
                 .await
             {
                 Ok(file) => files.push(file),
-                Err(e) => warn!("Failed to download {}: {}", media_url, e),
+                Err(e) => warn!(source_url = %media_url, error = %e, "Failed to download URL"),
             }
         }
 
@@ -248,15 +249,15 @@ impl Downloader for GalleryDlDownloader {
             Ok(output) => {
                 if output.status.success() {
                     let version = String::from_utf8_lossy(&output.stdout);
-                    info!("✅ gallery-dl is available, version: {}", version.trim());
+                    info!(version = %version.trim(), "gallery-dl is available");
                     true
                 } else {
-                    warn!("❌ gallery-dl command failed");
+                    warn!("gallery-dl command failed");
                     false
                 }
             }
             Err(e) => {
-                warn!("❌ gallery-dl not found: {}", e);
+                warn!(error = %e, "gallery-dl not found");
                 false
             }
         }

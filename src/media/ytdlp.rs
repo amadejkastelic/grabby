@@ -30,7 +30,7 @@ impl YtDlpDownloader {
     }
 
     async fn extract_metadata(&self, url: &str) -> Result<MediaMetadata> {
-        debug!("Extracting metadata with yt-dlp for: {}", url);
+        debug!(url = %url, "Extracting metadata with yt-dlp");
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -59,7 +59,7 @@ impl YtDlpDownloader {
         let json: Value =
             serde_json::from_str(&json_str).context("Failed to parse media metadata")?;
 
-        debug!("yt-dlp JSON output: {}", json_str);
+        debug!(url = %url, json = %json_str, "yt-dlp JSON output");
 
         Self::parse_json(&json)
     }
@@ -69,7 +69,11 @@ impl YtDlpDownloader {
         url: &str,
         metadata: &MediaMetadata,
     ) -> Result<Vec<MediaFile>> {
-        info!("Downloading media with yt-dlp: {}", metadata.id);
+        info!(
+            url = %url,
+            media_id = %metadata.id,
+            "Downloading media with yt-dlp"
+        );
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -98,20 +102,33 @@ impl YtDlpDownloader {
 
         let filename = format!("{}.{}", metadata.id, metadata.format_ext);
 
+        let magic_bytes: [u8; 4] = [
+            *output.stdout.first().unwrap_or(&0),
+            *output.stdout.get(1).unwrap_or(&0),
+            *output.stdout.get(2).unwrap_or(&0),
+            *output.stdout.get(3).unwrap_or(&0),
+        ];
         info!(
-            "yt-dlp output size: {} bytes, first 4 bytes: {:02x} {:02x} {:02x} {:02x}",
-            output.stdout.len(),
-            output.stdout.first().unwrap_or(&0),
-            output.stdout.get(1).unwrap_or(&0),
-            output.stdout.get(2).unwrap_or(&0),
-            output.stdout.get(3).unwrap_or(&0)
+            media_id = %metadata.id,
+            url = %url,
+            size_bytes = output.stdout.len(),
+            magic_bytes = ?magic_bytes,
+            "yt-dlp raw output"
         );
 
         let data = if output.stdout.len() > 2 && output.stdout.starts_with(&[0x47, 0x40]) {
-            info!("Detected MPEG-TS output, remuxing to MP4 with ffmpeg");
+            info!(
+                media_id = %metadata.id,
+                url = %url,
+                "Detected MPEG-TS output, remuxing to MP4 with ffmpeg"
+            );
             remux_ts_to_mp4(&output.stdout).await?
         } else {
-            info!("Output appears to be MP4 or other format, no remuxing needed");
+            info!(
+                media_id = %metadata.id,
+                url = %url,
+                "Output appears to be MP4 or other format, no remuxing needed"
+            );
             output.stdout
         };
 
@@ -177,15 +194,15 @@ impl Downloader for YtDlpDownloader {
             Ok(output) => {
                 if output.status.success() {
                     let version = String::from_utf8_lossy(&output.stdout);
-                    info!("✅ yt-dlp is available, version: {}", version.trim());
+                    info!(version = %version.trim(), "yt-dlp is available");
                     true
                 } else {
-                    warn!("❌ yt-dlp command failed");
+                    warn!("yt-dlp command failed");
                     false
                 }
             }
             Err(e) => {
-                warn!("❌ yt-dlp not found: {}", e);
+                warn!(error = %e, "yt-dlp not found");
                 false
             }
         };
@@ -203,17 +220,17 @@ impl Downloader for YtDlpDownloader {
                         .next()
                         .unwrap_or("unknown")
                         .to_string();
-                    info!("✅ ffmpeg is available: {}", version_line);
+                    info!(version = %version_line, "ffmpeg is available");
                     true
                 } else {
-                    warn!("❌ ffmpeg command failed");
+                    warn!("ffmpeg command failed");
                     false
                 }
             }
             Err(e) => {
                 warn!(
-                    "❌ ffmpeg not found: {} (required for video merging/re-encoding)",
-                    e
+                    error = %e,
+                    "ffmpeg not found (required for video merging/re-encoding)"
                 );
                 false
             }

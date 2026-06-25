@@ -37,18 +37,19 @@ pub fn resize_media_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
 
     if current_size <= max_size_bytes {
         debug!(
-            "File {} ({} bytes) is within size limit",
-            filename, current_size
+            file_name = %filename,
+            file_size = current_size,
+            max_size_bytes = max_size_bytes,
+            "File is within size limit"
         );
         return Ok(data.to_vec());
     }
 
     info!(
-        "Resizing {} ({} bytes, {:.2} MB) to fit within {} MB limit",
-        filename,
-        current_size,
-        current_size as f64 / 1_000_000.0,
-        max_size_mb
+        file_name = %filename,
+        file_size = current_size,
+        max_size_mb = max_size_mb,
+        "Resizing file to fit within size limit"
     );
 
     let mut input_file = NamedTempFile::new()?;
@@ -76,11 +77,12 @@ pub fn resize_media_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
     let audio_bitrate = target_bitrate / 10;
 
     info!(
-        "Video duration: {:.2}s, target bitrate: {} kbps (video: {} kbps, audio: {} kbps)",
-        duration,
-        target_bitrate / 1000,
-        video_bitrate / 1000,
-        audio_bitrate / 1000
+        file_name = %filename,
+        duration_secs = duration,
+        target_bitrate_kbps = target_bitrate / 1000,
+        video_bitrate_kbps = video_bitrate / 1000,
+        audio_bitrate_kbps = audio_bitrate / 1000,
+        "Computed target bitrate for video resize"
     );
 
     let pass1_output = NamedTempFile::with_suffix(format!(".{}.log", output_ext))?;
@@ -145,10 +147,10 @@ pub fn resize_media_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
     let new_size = resized_data.len() as u64;
 
     info!(
-        "Resized {} from {:.2} MB to {:.2} MB",
-        filename,
-        current_size as f64 / 1_000_000.0,
-        new_size as f64 / 1_000_000.0
+        file_name = %filename,
+        original_size_mb = current_size as f64 / 1_000_000.0,
+        new_size_mb = new_size as f64 / 1_000_000.0,
+        "Resized video"
     );
 
     Ok(resized_data)
@@ -160,18 +162,19 @@ pub fn resize_image_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
 
     if current_size <= max_size_bytes {
         debug!(
-            "File {} ({} bytes) is within size limit",
-            filename, current_size
+            file_name = %filename,
+            file_size = current_size,
+            max_size_bytes = max_size_bytes,
+            "File is within size limit"
         );
         return Ok(data.to_vec());
     }
 
     info!(
-        "Resizing {} ({} bytes, {:.2} MB) to fit within {} MB limit",
-        filename,
-        current_size,
-        current_size as f64 / 1_000_000.0,
-        max_size_mb
+        file_name = %filename,
+        file_size = current_size,
+        max_size_mb = max_size_mb,
+        "Resizing file to fit within size limit"
     );
 
     let mut input_file = NamedTempFile::new()?;
@@ -213,10 +216,10 @@ pub fn resize_image_file(data: &[u8], filename: &str, max_size_mb: u64) -> Resul
     let new_size = resized_data.len() as u64;
 
     info!(
-        "Resized {} from {:.2} MB to {:.2} MB",
-        filename,
-        current_size as f64 / 1_000_000.0,
-        new_size as f64 / 1_000_000.0
+        file_name = %filename,
+        original_size_mb = current_size as f64 / 1_000_000.0,
+        new_size_mb = new_size as f64 / 1_000_000.0,
+        "Resized image"
     );
 
     Ok(resized_data)

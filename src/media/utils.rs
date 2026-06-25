@@ -5,8 +5,8 @@ use tracing::info;
 /// Remuxes MPEG-TS data to MP4 format using ffmpeg.
 pub async fn remux_ts_to_mp4(ts_data: &[u8]) -> Result<Vec<u8>> {
     info!(
-        "Starting ffmpeg remux with {} bytes of TS data",
-        ts_data.len()
+        input_size = ts_data.len(),
+        "Starting ffmpeg remux of TS data to MP4"
     );
 
     let mut ffmpeg = tokio::process::Command::new("ffmpeg")
@@ -29,7 +29,7 @@ pub async fn remux_ts_to_mp4(ts_data: &[u8]) -> Result<Vec<u8>> {
         .spawn()
         .context("Failed to spawn ffmpeg")?;
 
-    info!("ffmpeg spawned successfully");
+    info!(input_size = ts_data.len(), "ffmpeg spawned successfully");
 
     let mut stdin = ffmpeg.stdin.take().context("Failed to get ffmpeg stdin")?;
     let ts_data = ts_data.to_vec();
@@ -39,11 +39,14 @@ pub async fn remux_ts_to_mp4(ts_data: &[u8]) -> Result<Vec<u8>> {
         let result = stdin.write_all(&ts_data).await;
         drop(stdin);
         match result {
-            Ok(_) => info!("Successfully wrote {} bytes to ffmpeg stdin", ts_data.len()),
+            Ok(_) => info!(
+                bytes_written = ts_data.len(),
+                "Successfully wrote to ffmpeg stdin"
+            ),
             Err(e) => info!(
-                "Failed to write to ffmpeg stdin: {}, kind: {:?}",
-                e,
-                e.kind()
+                error = %e,
+                error_kind = ?e.kind(),
+                "Failed to write to ffmpeg stdin"
             ),
         }
     });
@@ -69,13 +72,13 @@ pub async fn remux_ts_to_mp4(ts_data: &[u8]) -> Result<Vec<u8>> {
     );
 
     match result {
-        Ok(bytes_read) => info!("Read {} bytes from ffmpeg stdout", bytes_read),
-        Err(ref e) => info!("Failed to read ffmpeg stdout: {}", e),
+        Ok(bytes_read) => info!(bytes_read = bytes_read, "Read from ffmpeg stdout"),
+        Err(ref e) => info!(error = %e, "Failed to read ffmpeg stdout"),
     }
 
     match error {
-        Ok(bytes_read) => info!("Read {} bytes from ffmpeg stderr", bytes_read),
-        Err(ref e) => info!("Failed to read ffmpeg stderr: {}", e),
+        Ok(bytes_read) => info!(bytes_read = bytes_read, "Read from ffmpeg stderr"),
+        Err(ref e) => info!(error = %e, "Failed to read ffmpeg stderr"),
     }
 
     result.context("Failed to read ffmpeg output")?;
@@ -87,14 +90,15 @@ pub async fn remux_ts_to_mp4(ts_data: &[u8]) -> Result<Vec<u8>> {
 
     if !status.success() {
         let error = String::from_utf8_lossy(&error_buffer);
-        info!("ffmpeg failed with status {}: {}", status, error);
+        info!(
+            exit_status = %status,
+            stderr = %error,
+            "ffmpeg exited non-zero"
+        );
         return Err(anyhow::anyhow!("ffmpeg failed: {}", error));
     }
 
-    info!(
-        "Successfully remuxed to MP4, output size: {} bytes",
-        buffer.len()
-    );
+    info!(output_size = buffer.len(), "Successfully remuxed to MP4");
     Ok(buffer)
 }
 

@@ -58,18 +58,27 @@ impl MediaDownloader {
     }
 
     pub async fn download(&self, url: &str) -> Result<MediaInfo> {
-        info!("Starting download for URL: {}", url);
+        info!(url = %url, "Starting download");
 
         let mut errors = Vec::new();
 
         for downloader in &self.downloaders {
             match downloader.download(url).await {
                 Ok(media_info) => {
-                    info!("Successfully downloaded with {}", downloader.name());
+                    info!(
+                        url = %url,
+                        downloader = downloader.name(),
+                        "Successfully downloaded media"
+                    );
                     return Ok(media_info);
                 }
                 Err(e) => {
-                    warn!("{} failed: {}", downloader.name(), e);
+                    warn!(
+                        url = %url,
+                        downloader = downloader.name(),
+                        error = %e,
+                        "Downloader failed"
+                    );
                     errors.push(format!("{e}"));
                 }
             }
