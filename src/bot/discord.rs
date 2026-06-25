@@ -197,9 +197,9 @@ impl DiscordBot {
                     // Skip disabled domains silently
                     if server_config.is_domain_disabled(&url) {
                         info!(
-                            user_id = %msg.author.id,
-                            channel_id = %msg.channel_id,
-                            guild_id = ?msg.guild_id,
+                            user_id = msg.author.id.get(),
+                            channel_id = msg.channel_id.get(),
+                            guild_id = msg.guild_id.map(|g| g.get()),
                             url = %url,
                             "Skipping disabled domain in auto-embed channel"
                         );
@@ -210,9 +210,9 @@ impl DiscordBot {
                         match self.media_downloader.download(&url).await {
                             Ok(media_info) => {
                                 info!(
-                                    user_id = %msg.author.id,
-                                    channel_id = %msg.channel_id,
-                                    guild_id = ?msg.guild_id,
+                                    user_id = msg.author.id.get(),
+                                    channel_id = msg.channel_id.get(),
+                                    guild_id = msg.guild_id.map(|g| g.get()),
                                     url = %url,
                                     title = %media_info.metadata.title,
                                     file_count = media_info.files.len(),
@@ -235,9 +235,9 @@ impl DiscordBot {
                                         .content(&error_msg)
                                         .await;
                                     error!(
-                                        user_id = %msg.author.id,
-                                        channel_id = %msg.channel_id,
-                                        message_id = %msg.id,
+                                        user_id = msg.author.id.get(),
+                                        channel_id = msg.channel_id.get(),
+                                        message_id = msg.id.get(),
                                         url = %url,
                                         error = %e,
                                         "Failed to send media to channel"
@@ -252,9 +252,9 @@ impl DiscordBot {
                                     self.media_downloader.get_transformed_url(&url)
                                 {
                                     info!(
-                                        user_id = %msg.author.id,
-                                        channel_id = %msg.channel_id,
-                                        guild_id = ?msg.guild_id,
+                                        user_id = msg.author.id.get(),
+                                        channel_id = msg.channel_id.get(),
+                                        guild_id = msg.guild_id.map(|g| g.get()),
                                         url = %url,
                                         transformed_url = %transformed_url,
                                         "Download failed, sending transformed URL"
@@ -279,9 +279,9 @@ impl DiscordBot {
                                         .reply(msg.id)
                                         .await;
                                     error!(
-                                        user_id = %msg.author.id,
-                                        channel_id = %msg.channel_id,
-                                        guild_id = ?msg.guild_id,
+                                        user_id = msg.author.id.get(),
+                                        channel_id = msg.channel_id.get(),
+                                        guild_id = msg.guild_id.map(|g| g.get()),
                                         url = %url,
                                         error = %e,
                                         "Failed to download media"
@@ -331,10 +331,10 @@ impl DiscordBot {
                                 .await
                             {
                                 error!(
-                                    reactor_id = %reaction.user_id,
-                                    channel_id = %reaction.channel_id,
-                                    message_id = %reaction.message_id,
-                                    original_author_id = ?original_user_id,
+                                    reactor_id = reaction.user_id.get(),
+                                    channel_id = reaction.channel_id.get(),
+                                    message_id = reaction.message_id.get(),
+                                    original_author_id = original_user_id.map(|id| id.get()),
                                     error = %e,
                                     "Failed to delete message via reaction"
                                 );
@@ -360,10 +360,10 @@ impl DiscordBot {
                         _ => {
                             info!(
                                 command = %data.name,
-                                user_id = ?interaction.author_id(),
-                                channel_id = ?interaction.channel.as_ref().map(|c| c.id),
-                                guild_id = ?interaction.guild_id,
-                                interaction_id = %interaction.id,
+                                user_id = interaction.author_id().map(|id| id.get()),
+                                channel_id = interaction.channel.as_ref().map(|c| c.id.get()),
+                                guild_id = interaction.guild_id.map(|g| g.get()),
+                                interaction_id = interaction.id.get(),
                                 "Unknown command"
                             );
                         }
@@ -408,9 +408,9 @@ impl DiscordBot {
         match download_result {
             Ok(media_info) => {
                 info!(
-                    user_id = ?interaction.author_id(),
-                    channel_id = ?interaction.channel.as_ref().map(|c| c.id),
-                    guild_id = ?interaction.guild_id,
+                    user_id = interaction.author_id().map(|id| id.get()),
+                    channel_id = interaction.channel.as_ref().map(|c| c.id.get()),
+                    guild_id = interaction.guild_id.map(|g| g.get()),
                     url = %options.url,
                     title = %media_info.metadata.title,
                     file_count = media_info.files.len(),
@@ -423,9 +423,9 @@ impl DiscordBot {
                         Some(channel) => channel.id,
                         None => {
                             error!(
-                                user_id = ?interaction.author_id(),
-                                guild_id = ?interaction.guild_id,
-                                interaction_id = %interaction.id,
+                                user_id = interaction.author_id().map(|id| id.get()),
+                                guild_id = interaction.guild_id.map(|g| g.get()),
+                                interaction_id = interaction.id.get(),
                                 "No channel information in interaction"
                             );
                             let _ = self
@@ -452,8 +452,8 @@ impl DiscordBot {
                         .await
                     {
                         error!(
-                            user_id = ?user_id,
-                            channel_id = %channel_id,
+                            user_id = user_id.map(|id| id.get()),
+                            channel_id = channel_id.get(),
                             url = %options.url,
                             error = %e,
                             "Failed to send media to channel"
@@ -470,9 +470,9 @@ impl DiscordBot {
             }
             Err(e) => {
                 error!(
-                    user_id = ?interaction.author_id(),
-                    channel_id = ?interaction.channel.as_ref().map(|c| c.id),
-                    guild_id = ?interaction.guild_id,
+                    user_id = interaction.author_id().map(|id| id.get()),
+                    channel_id = interaction.channel.as_ref().map(|c| c.id.get()),
+                    guild_id = interaction.guild_id.map(|g| g.get()),
                     url = %options.url,
                     error = %e,
                     "Failed to download media"
@@ -547,7 +547,7 @@ impl DiscordBot {
             let file_size = file.data.len() as u64;
 
             debug!(
-                channel_id = %channel_id,
+                channel_id = channel_id.get(),
                 file_name = %file.filename,
                 file_size = file_size,
                 "Processing file"
@@ -556,7 +556,7 @@ impl DiscordBot {
             // Skip empty files
             if file_size == 0 {
                 warn!(
-                    channel_id = %channel_id,
+                    channel_id = channel_id.get(),
                     file_name = %file.filename,
                     "Skipping empty file"
                 );
@@ -567,7 +567,7 @@ impl DiscordBot {
             #[allow(unused_variables)]
             let (file_data, file_size) = if file_size > 10_000_000 {
                 info!(
-                    channel_id = %channel_id,
+                    channel_id = channel_id.get(),
                     file_name = %file.filename,
                     file_size = file_size,
                     max_size_mb = 10u64,
@@ -594,7 +594,7 @@ impl DiscordBot {
                 match resize_result {
                     Ok(Ok(resized_data)) => {
                         info!(
-                            channel_id = %channel_id,
+                            channel_id = channel_id.get(),
                             file_name = %file.filename,
                             original_size = file_size,
                             new_size = resized_data.len() as u64,
@@ -604,7 +604,7 @@ impl DiscordBot {
                     }
                     Ok(Err(e)) => {
                         warn!(
-                            channel_id = %channel_id,
+                            channel_id = channel_id.get(),
                             file_name = %file.filename,
                             error = %e,
                             "Failed to resize file, marking as oversized"
@@ -614,7 +614,7 @@ impl DiscordBot {
                     }
                     Err(e) => {
                         warn!(
-                            channel_id = %channel_id,
+                            channel_id = channel_id.get(),
                             file_name = %file.filename,
                             error = %e,
                             "Resize task failed"
@@ -698,12 +698,12 @@ impl DiscordBot {
 
         // Send message with multiple attachments
         debug!(
-            channel_id = %channel_id,
+            channel_id = channel_id.get(),
             attachment_count = attachments.len(),
             "Sending message with attachments"
         );
         debug!(
-            channel_id = %channel_id,
+            channel_id = channel_id.get(),
             filenames = ?attachments.iter().map(|a| &a.filename).collect::<Vec<_>>(),
             "Attachment filenames"
         );
