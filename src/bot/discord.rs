@@ -218,6 +218,36 @@ impl DiscordBot {
                         continue;
                     }
 
+                    if server_config.transform_only {
+                        if let Some(transformed_url) =
+                            self.media_downloader.get_transformed_url(&url)
+                        {
+                            info!(
+                                user_id = msg.author.id.get(),
+                                channel_id = msg.channel_id.get(),
+                                guild_id = msg.guild_id.map(|g| g.get()),
+                                url = %url,
+                                transformed_url = %transformed_url,
+                                "Posting transformed URL (transform-only mode)"
+                            );
+                            let _ = self
+                                .http
+                                .create_message(msg.channel_id)
+                                .content(&format!("<@{}> {}", msg.author.id, transformed_url))
+                                .await;
+                            let _ = self.http.delete_message(msg.channel_id, msg.id).await;
+                        } else {
+                            info!(
+                                user_id = msg.author.id.get(),
+                                channel_id = msg.channel_id.get(),
+                                guild_id = msg.guild_id.map(|g| g.get()),
+                                url = %url,
+                                "Skipping URL with no transform in transform-only mode"
+                            );
+                        }
+                        break;
+                    }
+
                     if self.media_downloader.is_supported_url(&url) {
                         match self.media_downloader.download(&url).await {
                             Ok(media_info) => {
@@ -404,6 +434,84 @@ impl DiscordBot {
         if !self.media_downloader.is_supported_url(&options.url) {
             self.respond_to_interaction(interaction, "This URL is not supported.")
                 .await?;
+            return Ok(());
+        }
+
+        // Transform-only mode: post the transformed URL instead of downloading
+        let transform_only = interaction
+            .guild_id
+            .map(|gid| {
+                self.config
+                    .get_server_config(&gid.to_string())
+                    .transform_only
+            })
+            .unwrap_or(false);
+
+        if transform_only {
+            if let Some(transformed_url) = self.media_downloader.get_transformed_url(&options.url) {
+                self.respond_to_interaction(interaction, "Transforming URL...")
+                    .await?;
+
+                let channel_id = match interaction.channel.as_ref() {
+                    Some(channel) => channel.id,
+                    None => {
+                        error!(
+                            user_id = interaction.author_id().map(|id| id.get()),
+                            guild_id = interaction.guild_id.map(|g| g.get()),
+                            interaction_id = interaction.id.get(),
+                            "No channel information in interaction"
+                        );
+                        let _ = self
+                            .followup_message(interaction, "Cannot determine channel for upload")
+                            .await;
+                        return Ok(());
+                    }
+                };
+
+                let user_id = interaction
+                    .author_id()
+                    .or_else(|| interaction.user.as_ref().map(|u| u.id));
+
+                info!(
+                    user_id = interaction.author_id().map(|id| id.get()),
+                    channel_id = interaction.channel.as_ref().map(|c| c.id.get()),
+                    guild_id = interaction.guild_id.map(|g| g.get()),
+                    url = %options.url,
+                    transformed_url = %transformed_url,
+                    "Posting transformed URL (transform-only mode)"
+                );
+
+                let content = match user_id {
+                    Some(uid) => format!("<@{uid}> {transformed_url}"),
+                    None => transformed_url,
+                };
+
+                if let Err(e) = self.http.create_message(channel_id).content(&content).await {
+                    error!(
+                        user_id = user_id.map(|id| id.get()),
+                        channel_id = channel_id.get(),
+                        url = %options.url,
+                        error = %e,
+                        "Failed to send transformed URL"
+                    );
+                    let _ = self
+                        .followup_message(interaction, "Failed to send transformed URL")
+                        .await;
+                }
+            } else {
+                info!(
+                    user_id = interaction.author_id().map(|id| id.get()),
+                    channel_id = interaction.channel.as_ref().map(|c| c.id.get()),
+                    guild_id = interaction.guild_id.map(|g| g.get()),
+                    url = %options.url,
+                    "Skipping /embed: no transform available in transform-only mode"
+                );
+                self.respond_to_interaction(
+                    interaction,
+                    "No transform available for this domain in transform-only mode.",
+                )
+                .await?;
+            }
             return Ok(());
         }
 

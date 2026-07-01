@@ -19,6 +19,7 @@ let
       embed_enabled = server.embedEnabled;
       disabled_domains = server.disabledDomains;
       allowed_domains = server.allowedDomains;
+      transform_only = server.transformOnly;
     }) cfg.servers;
   };
 in
@@ -95,6 +96,12 @@ in
                 "example.com"
                 "another-site.org"
               ];
+            };
+
+            transformOnly = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "When true, skip downloading and only post transformed URLs (e.g. x.com -> fxtwitter.com). URLs with no transform mapping are ignored. Applies to auto-embed channels and the /embed command.";
             };
           };
         }

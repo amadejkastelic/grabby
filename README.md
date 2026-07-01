@@ -12,6 +12,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 - **Slash Command**: `/embed` command with options for URL, custom message, and spoiler mode
 - **Auto-Embed Channels**: Automatically processes URLs in configured channels without commands
 - **Domain Filtering**: Per-server whitelist (`allowed_domains`) and blacklist (`disabled_domains`) control which domains are auto-embedded
+- **Transform-Only Mode**: Optional per-server mode that posts transformed URLs (e.g. `x.com` → `fxtwitter.com`) for Discord's native embeds instead of downloading
 - **Metadata Extraction**: Displays title, author, likes, and original URL with downloaded files
 - **File Size Limits**: Enforces Discord's 25MB file size limit with user feedback
 - **Auto-Resize**: Automatically resizes oversized media files using ffmpeg to fit Discord's 25MB limit
@@ -174,6 +175,10 @@ disabled_domains = ["example.com", "another-site.org"]
 # When non-empty, only URLs from these domains are processed in auto-embed
 # channels (empty = allow all). disabled_domains always wins over this list.
 allowed_domains = []
+# When true, skip downloading and only post transformed URLs (e.g. x.com ->
+# fxtwitter.com) so Discord renders the native embed. URLs with no transform
+# mapping are ignored. Applies to auto-embed channels and the /embed command.
+transform_only = false
 
 # Add more servers by repeating the [[servers]] section
 # [[servers]]
@@ -213,6 +218,10 @@ Control which domains are auto-embedded per server (the `/embed` slash command i
 - **`disabled_domains`** (blacklist): URLs from these domains are skipped in auto-embed channels.
 - **`allowed_domains`** (whitelist): When non-empty, only URLs from these domains are processed. An empty list allows all domains (default).
 - If a domain appears in both lists, the blacklist wins.
+
+### Transform-Only Mode
+
+Set `transform_only = true` per server to skip downloading entirely. The bot posts transformed URLs (e.g. `x.com` → `fxtwitter.com`, `reddit.com` → `vxreddit.com`) so Discord renders the native embed without any media download. URLs with no transform mapping are ignored. Applies to both auto-embed channels and the `/embed` command.
 
 ### Reaction Deletion
 

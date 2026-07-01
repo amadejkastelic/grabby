@@ -12,6 +12,8 @@ pub struct ServerConfig {
     pub disabled_domains: HashSet<String>,
     #[serde(default)]
     pub allowed_domains: HashSet<String>,
+    #[serde(default)]
+    pub transform_only: bool,
 }
 
 impl Default for ServerConfig {
@@ -22,6 +24,7 @@ impl Default for ServerConfig {
             embed_enabled: true,
             disabled_domains: HashSet::new(),
             allowed_domains: HashSet::new(),
+            transform_only: false,
         }
     }
 }
@@ -34,6 +37,7 @@ impl ServerConfig {
             embed_enabled: true,
             disabled_domains: HashSet::new(),
             allowed_domains: HashSet::new(),
+            transform_only: false,
         }
     }
 
@@ -656,5 +660,44 @@ mod tests {
 
         let config = Config::from_file(temp_file.path()).unwrap();
         assert!(config.servers[0].allowed_domains.is_empty());
+    }
+
+    #[test]
+    fn test_transform_only_defaults_false() {
+        assert!(!ServerConfig::default().transform_only);
+        assert!(!ServerConfig::new("server1").transform_only);
+    }
+
+    #[test]
+    fn test_config_from_file_transform_only_defaults_false() {
+        let toml_content = r#"
+            [[servers]]
+            server_id = "server1"
+            auto_embed_channels = ["channel1"]
+            embed_enabled = true
+        "#;
+
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), toml_content).unwrap();
+
+        let config = Config::from_file(temp_file.path()).unwrap();
+        assert!(!config.servers[0].transform_only);
+    }
+
+    #[test]
+    fn test_config_from_file_transform_only_enabled() {
+        let toml_content = r#"
+            [[servers]]
+            server_id = "server1"
+            auto_embed_channels = ["channel1"]
+            embed_enabled = true
+            transform_only = true
+        "#;
+
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), toml_content).unwrap();
+
+        let config = Config::from_file(temp_file.path()).unwrap();
+        assert!(config.servers[0].transform_only);
     }
 }
