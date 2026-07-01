@@ -194,7 +194,7 @@ impl DiscordBot {
             let server_config = self.config.get_server_config(&guild_id.to_string());
             if server_config.is_auto_embed_channel(&msg.channel_id.to_string()) {
                 for url in self.extract_urls(&msg.content) {
-                    // Skip disabled domains silently
+                    // Skip disabled domains silently (blacklist wins)
                     if server_config.is_domain_disabled(&url) {
                         info!(
                             user_id = msg.author.id.get(),
@@ -202,6 +202,18 @@ impl DiscordBot {
                             guild_id = msg.guild_id.map(|g| g.get()),
                             url = %url,
                             "Skipping disabled domain in auto-embed channel"
+                        );
+                        continue;
+                    }
+
+                    // Skip non-whitelisted domains silently when a whitelist is configured
+                    if !server_config.is_domain_allowed(&url) {
+                        info!(
+                            user_id = msg.author.id.get(),
+                            channel_id = msg.channel_id.get(),
+                            guild_id = msg.guild_id.map(|g| g.get()),
+                            url = %url,
+                            "Skipping non-whitelisted domain in auto-embed channel"
                         );
                         continue;
                     }

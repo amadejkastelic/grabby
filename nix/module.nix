@@ -18,6 +18,7 @@ let
       auto_embed_channels = server.autoEmbedChannels;
       embed_enabled = server.embedEnabled;
       disabled_domains = server.disabledDomains;
+      allowed_domains = server.allowedDomains;
     }) cfg.servers;
   };
 in
@@ -80,6 +81,16 @@ in
               type = lib.types.listOf lib.types.str;
               default = [ ];
               description = "List of domains to skip in auto-embed channels (slash command still works)";
+              example = [
+                "example.com"
+                "another-site.org"
+              ];
+            };
+
+            allowedDomains = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "When non-empty, only URLs from these domains are processed in auto-embed channels (empty = allow all). disabled_domains always wins over this list.";
               example = [
                 "example.com"
                 "another-site.org"

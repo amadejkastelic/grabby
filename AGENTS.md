@@ -14,6 +14,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 - **Metadata Extraction**: Displays title, author, likes, and original URL with downloaded files
 - **File Size Limits**: Enforces Discord's 25MB file size limit with user feedback
 - **Auto-Resize**: Automatically resizes oversized media files using ffmpeg to fit Discord's 25MB limit
+- **Domain Filtering**: Per-server whitelist (`allowed_domains`) and blacklist (`disabled_domains`) gate which domains are auto-embedded (the `/embed` command is unaffected). Empty whitelist = allow all; blacklist wins when a domain is in both.
 
 ### User Experience
 - **Reaction Deletion**: ❌ emoji reaction allows original poster or admins to delete embeds
@@ -95,6 +96,11 @@ discord_token = "your_bot_token_here"
 server_id = "123456789"
 auto_embed_channels = ["channel1", "channel2"]
 embed_enabled = true
+# Domains to skip in auto-embed channels (slash command still works)
+disabled_domains = ["example.com"]
+# When non-empty, only URLs from these domains are processed in auto-embed
+# channels (empty = allow all). disabled_domains always wins over this list.
+allowed_domains = []
 
 [[servers]]
 server_id = "987654321"

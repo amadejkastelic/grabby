@@ -10,6 +10,8 @@ pub struct ServerConfig {
     pub embed_enabled: bool,
     #[serde(default)]
     pub disabled_domains: HashSet<String>,
+    #[serde(default)]
+    pub allowed_domains: HashSet<String>,
 }
 
 impl Default for ServerConfig {
@@ -19,6 +21,7 @@ impl Default for ServerConfig {
             auto_embed_channels: HashSet::new(),
             embed_enabled: true,
             disabled_domains: HashSet::new(),
+            allowed_domains: HashSet::new(),
         }
     }
 }
@@ -30,6 +33,7 @@ impl ServerConfig {
             auto_embed_channels: HashSet::new(),
             embed_enabled: true,
             disabled_domains: HashSet::new(),
+            allowed_domains: HashSet::new(),
         }
     }
 
@@ -38,23 +42,34 @@ impl ServerConfig {
     }
 
     pub fn is_domain_disabled(&self, url: &str) -> bool {
-        if self.disabled_domains.is_empty() {
+        self.domain_in_set(url, &self.disabled_domains)
+    }
+
+    pub fn is_domain_allowed(&self, url: &str) -> bool {
+        if self.allowed_domains.is_empty() {
+            return true;
+        }
+        self.domain_in_set(url, &self.allowed_domains)
+    }
+
+    fn domain_in_set(&self, url: &str, set: &HashSet<String>) -> bool {
+        if set.is_empty() {
             return false;
         }
 
         if let Some(host) = Self::extract_host(url) {
             let host_lower = host.to_lowercase();
 
-            for disabled in &self.disabled_domains {
-                let disabled_lower = disabled.to_lowercase();
+            for domain in set {
+                let domain_lower = domain.to_lowercase();
 
                 // Exact match
-                if host_lower == disabled_lower {
+                if host_lower == domain_lower {
                     return true;
                 }
 
-                // Subdomain match (e.g., if "example.com" is disabled, "sub.example.com" is also disabled)
-                if host_lower.ends_with(&format!(".{}", disabled_lower)) {
+                // Subdomain match (e.g., if "example.com" is set, "sub.example.com" matches)
+                if host_lower.ends_with(&format!(".{domain_lower}")) {
                     return true;
                 }
             }
@@ -524,5 +539,122 @@ mod tests {
         assert_eq!(config.servers.len(), 1);
         assert!(config.servers[0].disabled_domains.contains("example.com"));
         assert!(config.servers[0].disabled_domains.contains("test.org"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_empty_allow_all() {
+        let config = ServerConfig::new("test_server");
+        // Empty whitelist allows everything
+        assert!(config.is_domain_allowed("https://example.com"));
+        assert!(config.is_domain_allowed("https://anything.org"));
+        assert!(config.is_domain_allowed("https://foo.bar.baz"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_exact_match() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_allowed("https://example.com"));
+        assert!(config.is_domain_allowed("http://example.com"));
+        assert!(config.is_domain_allowed("https://example.com/path"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_subdomain() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_allowed("https://sub.example.com"));
+        assert!(config.is_domain_allowed("https://deep.sub.example.com"));
+        // Suffix match must not bleed past the label boundary
+        assert!(!config.is_domain_allowed("https://example.com.au"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_case_insensitive() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("EXAMPLE.COM".to_string());
+
+        assert!(config.is_domain_allowed("https://example.com"));
+        assert!(config.is_domain_allowed("https://Example.Com"));
+        assert!(config.is_domain_allowed("https://SUB.example.com"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_not_in_set() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("example.com".to_string());
+
+        assert!(!config.is_domain_allowed("https://other.com"));
+        assert!(!config.is_domain_allowed("https://notexample.com"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_with_port() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_allowed("https://example.com:8080"));
+        assert!(config.is_domain_allowed("http://example.com:3000/path"));
+    }
+
+    #[test]
+    fn test_is_domain_allowed_multiple_domains() {
+        let mut config = ServerConfig::new("test_server");
+        config.allowed_domains.insert("example.com".to_string());
+        config.allowed_domains.insert("foo.org".to_string());
+
+        assert!(config.is_domain_allowed("https://example.com"));
+        assert!(config.is_domain_allowed("https://sub.foo.org"));
+        assert!(!config.is_domain_allowed("https://bar.com"));
+    }
+
+    #[test]
+    fn test_blacklist_overrides_whitelist() {
+        // A domain in both sets should be treated as disabled (blacklist wins)
+        let mut config = ServerConfig::new("test_server");
+        config.disabled_domains.insert("example.com".to_string());
+        config.allowed_domains.insert("example.com".to_string());
+
+        assert!(config.is_domain_disabled("https://example.com"));
+        assert!(config.is_domain_allowed("https://example.com"));
+    }
+
+    #[test]
+    fn test_config_from_file_with_allowed_domains() {
+        let toml_content = r#"
+            [[servers]]
+            server_id = "server1"
+            auto_embed_channels = ["channel1"]
+            embed_enabled = true
+            allowed_domains = ["example.com", "test.org"]
+        "#;
+
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), toml_content).unwrap();
+
+        let config = Config::from_file(temp_file.path()).unwrap();
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers[0].allowed_domains.contains("example.com"));
+        assert!(config.servers[0].allowed_domains.contains("test.org"));
+        assert!(config.servers[0].disabled_domains.is_empty());
+    }
+
+    #[test]
+    fn test_config_from_file_allowed_domains_defaults_empty() {
+        // allowed_domains omitted -> defaults to empty (allow all)
+        let toml_content = r#"
+            [[servers]]
+            server_id = "server1"
+            auto_embed_channels = ["channel1"]
+            embed_enabled = true
+        "#;
+
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), toml_content).unwrap();
+
+        let config = Config::from_file(temp_file.path()).unwrap();
+        assert!(config.servers[0].allowed_domains.is_empty());
     }
 }

@@ -11,6 +11,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 - **In-Memory Processing**: Downloads media directly to memory and uploads to Discord (no disk I/O)
 - **Slash Command**: `/embed` command with options for URL, custom message, and spoiler mode
 - **Auto-Embed Channels**: Automatically processes URLs in configured channels without commands
+- **Domain Filtering**: Per-server whitelist (`allowed_domains`) and blacklist (`disabled_domains`) control which domains are auto-embedded
 - **Metadata Extraction**: Displays title, author, likes, and original URL with downloaded files
 - **File Size Limits**: Enforces Discord's 25MB file size limit with user feedback
 - **Auto-Resize**: Automatically resizes oversized media files using ffmpeg to fit Discord's 25MB limit
@@ -168,6 +169,11 @@ auto_embed_channels = [
   "CHANNEL_ID_2"
 ]
 embed_enabled = true
+# Domains to skip in auto-embed channels (slash command still works)
+disabled_domains = ["example.com", "another-site.org"]
+# When non-empty, only URLs from these domains are processed in auto-embed
+# channels (empty = allow all). disabled_domains always wins over this list.
+allowed_domains = []
 
 # Add more servers by repeating the [[servers]] section
 # [[servers]]
@@ -199,6 +205,14 @@ Options:
 ### Auto-Embed Channels
 
 Configure channels for automatic embedding in your config file. Any URL posted in these channels will be automatically embedded without requiring the `/embed` command.
+
+### Domain Filtering
+
+Control which domains are auto-embedded per server (the `/embed` slash command is unaffected):
+
+- **`disabled_domains`** (blacklist): URLs from these domains are skipped in auto-embed channels.
+- **`allowed_domains`** (whitelist): When non-empty, only URLs from these domains are processed. An empty list allows all domains (default).
+- If a domain appears in both lists, the blacklist wins.
 
 ### Reaction Deletion
 
