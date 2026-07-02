@@ -18,7 +18,7 @@ use ytdlp::YtDlpDownloader;
 const URL_TRANSFORMS: &[(&str, &str)] = &[
     ("instagram.com", "kkinstagram.com"),
     ("instagr.am", "kkinstagram.com"),
-    ("tiktok.com", "fxtiktok.com"),
+    ("tiktok.com", "kktiktok.com"),
     ("x.com", "fxtwitter.com"),
     ("twitter.com", "fxtwitter.com"),
     ("reddit.com", "vxreddit.com"),
@@ -166,7 +166,7 @@ mod tests {
     fn test_transform_tiktok_basic() {
         assert_eq!(
             get_transformed_url("https://www.tiktok.com/@user/video/123"),
-            Some("https://fxtiktok.com/@user/video/123".to_string())
+            Some("https://kktiktok.com/@user/video/123".to_string())
         );
     }
 
@@ -174,7 +174,7 @@ mod tests {
     fn test_transform_tiktok_vm_subdomain() {
         assert_eq!(
             get_transformed_url("https://vm.tiktok.com/ZMhAbCdEf/"),
-            Some("https://fxtiktok.com/ZMhAbCdEf/".to_string())
+            Some("https://kktiktok.com/ZMhAbCdEf/".to_string())
         );
     }
 
@@ -239,7 +239,7 @@ mod tests {
         );
         assert_eq!(
             get_transformed_url("https://VM.TikTok.com/ZMhAbCdEf/"),
-            Some("https://fxtiktok.com/ZMhAbCdEf/".to_string())
+            Some("https://kktiktok.com/ZMhAbCdEf/".to_string())
         );
     }
 
