@@ -11,7 +11,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -30,7 +33,7 @@
     {
       self,
       nixpkgs,
-      rust-overlay,
+      fenix,
       flake-utils,
       pre-commit-hooks,
       nix-github-actions,
@@ -38,12 +41,21 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs {
-          inherit system overlays;
+        pkgs = import nixpkgs { inherit system; };
+
+        rustPlatform = pkgs.makeRustPlatform {
+          inherit (fenix.packages.${system}.stable) rustc cargo;
         };
 
-        grabbyPkg = pkgs.callPackage ./nix/package.nix { };
+        devToolchain = fenix.packages.${system}.stable.withComponents [
+          "cargo"
+          "clippy"
+          "rust-src"
+          "rustc"
+          "rustfmt"
+        ];
+
+        grabbyPkg = pkgs.callPackage ./nix/package.nix { inherit rustPlatform; };
 
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -56,7 +68,7 @@
               settings.denyWarnings = true;
             };
           };
-          settings.rust.check.cargoDeps = pkgs.rustPlatform.importCargoLock {
+          settings.rust.check.cargoDeps = rustPlatform.importCargoLock {
             lockFile = ./Cargo.lock;
           };
         };
@@ -74,7 +86,7 @@
         };
 
         devShells.default = pkgs.callPackage ./nix/shell.nix {
-          pre-commit-check = pre-commit-check;
+          inherit rustPlatform devToolchain pre-commit-check;
           pkgs = pkgs;
         };
 
