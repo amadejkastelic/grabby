@@ -18,11 +18,11 @@ use ytdlp::YtDlpDownloader;
 const URL_TRANSFORMS: &[(&str, &[&str])] = &[
     (
         "instagram.com",
-        &["kkinstagram.com", "ddinstagram.com", "oginstagram.com"],
+        &["kkinstagram.com", "d.oginstagram.com", "uuinstagram.com"],
     ),
     (
         "instagr.am",
-        &["kkinstagram.com", "ddinstagram.com", "oginstagram.com"],
+        &["kkinstagram.com", "d.oginstagram.com", "uuinstagram.com"],
     ),
     ("tiktok.com", &["kktiktok.com", "vxtiktok.com"]),
     ("x.com", &["fxtwitter.com", "vxtwitter.com", "fixupx.com"]),
