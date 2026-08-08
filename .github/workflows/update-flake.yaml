@@ -9,20 +9,20 @@ jobs:
     if: github.repository == 'amadejkastelic/grabby'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.PAT }}
 
       - uses: DeterminateSystems/nix-installer-action@main
 
-      - uses: cachix/cachix-action@v15
+      - uses: cachix/cachix-action@v17
         with:
           name: amadejkastelic
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - run: nix flake update
 
-      - uses: stefanzweifel/git-auto-commit-action@v4
+      - uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "flake.lock: Update"
 
