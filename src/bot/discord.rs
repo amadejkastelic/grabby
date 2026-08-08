@@ -160,7 +160,7 @@ impl DiscordBot {
                 let swept = before - state.len();
                 if swept > 0 {
                     debug!(
-                        swept,
+                        swept = swept,
                         remaining = state.len(),
                         "Swept expired refresh state entries"
                     );
@@ -582,15 +582,15 @@ impl DiscordBot {
                         .flags(MessageFlags::SUPPRESS_EMBEDS)
                         .await
                     {
-                        warn!(mirror_host, error = %e, "Failed to edit message during refresh");
+                        warn!(mirror_host = %mirror_host, error = %e, "Failed to edit message during refresh");
                         continue;
                     }
 
-                    info!(mirror_host, "Refreshed media from new mirror");
+                    info!(mirror_host = %mirror_host, "Refreshed media from new mirror");
                     return Ok(Some(mirror_host.to_string()));
                 }
                 Err(e) => {
-                    warn!(mirror_host, error = %e, "Refresh download from mirror failed");
+                    warn!(mirror_host = %mirror_host, error = %e, "Refresh download from mirror failed");
                     continue;
                 }
             }
@@ -624,11 +624,11 @@ impl DiscordBot {
             .content(Some(&new_content))
             .await
         {
-            warn!(mirror_host, error = %e, "Failed to swap mirror link during refresh");
+            warn!(mirror_host = %mirror_host, error = %e, "Failed to swap mirror link during refresh");
             return Ok(None);
         }
 
-        info!(mirror_host, "Swapped mirror link during refresh");
+        info!(mirror_host = %mirror_host, "Swapped mirror link during refresh");
         Ok(Some(mirror_host.to_string()))
     }
 
@@ -897,7 +897,7 @@ impl DiscordBot {
         for file in &media_info.files {
             let file_size = file.data.len() as u64;
 
-            debug!(file_name = %file.filename, file_size, "Processing file");
+            debug!(file_name = %file.filename, file_size = file_size, "Processing file");
 
             if file_size == 0 {
                 warn!(file_name = %file.filename, "Skipping empty file");
