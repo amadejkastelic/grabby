@@ -1,7 +1,9 @@
 use crate::{config::ConfigManager, media::MediaDownloader};
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::join;
 use tracing::{debug, error, info, warn};
 use twilight_cache_inmemory::InMemoryCache;
@@ -22,7 +24,7 @@ use twilight_model::{
         interaction::{InteractionResponse, InteractionResponseType},
     },
     id::{
-        marker::{ApplicationMarker, ChannelMarker, UserMarker},
+        marker::{ApplicationMarker, ChannelMarker, MessageMarker, UserMarker},
         Id,
     },
 };
@@ -46,6 +48,19 @@ fn clean_error_message(error: &anyhow::Error) -> String {
     "Download failed".to_string()
 }
 
+const REFRESH_EMOJI: &str = "🔄";
+const REFRESH_STATE_TTL: Duration = Duration::from_secs(3600);
+const REFRESH_STATE_SWEEP_INTERVAL: Duration = Duration::from_secs(600);
+
+#[derive(Clone)]
+struct RefreshState {
+    source_url: String,
+    current_host: Option<String>,
+    is_download: bool,
+    spoiler: bool,
+    created_at: Instant,
+}
+
 #[derive(Clone)]
 pub struct DiscordBot {
     http: Arc<HttpClient>,
@@ -54,6 +69,7 @@ pub struct DiscordBot {
     config: Arc<ConfigManager>,
     application_id: Id<ApplicationMarker>,
     user_id: Id<UserMarker>,
+    refresh_state: Arc<Mutex<HashMap<Id<MessageMarker>, RefreshState>>>,
 }
 
 impl DiscordBot {
@@ -93,6 +109,7 @@ impl DiscordBot {
             config: Arc::new(config),
             application_id,
             user_id,
+            refresh_state: Arc::new(Mutex::new(HashMap::new())),
         };
 
         bot.register_commands().await?;
@@ -126,8 +143,36 @@ impl DiscordBot {
         Ok(())
     }
 
+    fn spawn_refresh_state_sweeper(&self) {
+        let bot = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(REFRESH_STATE_SWEEP_INTERVAL);
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let now = Instant::now();
+                let mut state = match bot.refresh_state.lock() {
+                    Ok(state) => state,
+                    Err(_) => continue,
+                };
+                let before = state.len();
+                state.retain(|_, entry| now.duration_since(entry.created_at) < REFRESH_STATE_TTL);
+                let swept = before - state.len();
+                if swept > 0 {
+                    debug!(
+                        swept,
+                        remaining = state.len(),
+                        "Swept expired refresh state entries"
+                    );
+                }
+            }
+        });
+    }
+
     pub async fn run(self, mut shard: Shard) -> Result<()> {
         info!("Discord bot starting...");
+
+        self.spawn_refresh_state_sweeper();
 
         loop {
             let event = match shard
@@ -231,9 +276,12 @@ impl DiscordBot {
                                 "Posting transformed URL (transform-only mode)"
                             );
                             let _ = self
-                                .http
-                                .create_message(msg.channel_id)
-                                .content(&format!("<@{}> {}", msg.author.id, transformed_url))
+                                .post_mirror_link(
+                                    msg.channel_id,
+                                    Some(msg.author.id),
+                                    &url,
+                                    &transformed_url,
+                                )
                                 .await;
                             let _ = self.http.delete_message(msg.channel_id, msg.id).await;
                         } else {
@@ -302,12 +350,12 @@ impl DiscordBot {
                                         "Download failed, sending transformed URL"
                                     );
                                     let _ = self
-                                        .http
-                                        .create_message(msg.channel_id)
-                                        .content(&format!(
-                                            "<@{}> {}",
-                                            msg.author.id, transformed_url
-                                        ))
+                                        .post_mirror_link(
+                                            msg.channel_id,
+                                            Some(msg.author.id),
+                                            &url,
+                                            &transformed_url,
+                                        )
                                         .await;
                                     let _ = self.http.delete_message(msg.channel_id, msg.id).await;
                                 } else {
@@ -341,7 +389,6 @@ impl DiscordBot {
     }
 
     async fn handle_reaction_add(&self, reaction: &ReactionAdd) -> Result<()> {
-        // Only handle X emoji reactions
         match &reaction.emoji {
             EmojiReactionType::Unicode { name } if name == "❌" => {
                 // Skip if the reactor is the bot itself
@@ -385,9 +432,204 @@ impl DiscordBot {
                     }
                 }
             }
-            _ => {} // Ignore other emoji types
+            EmojiReactionType::Unicode { name } if name == REFRESH_EMOJI => {
+                self.handle_refresh_reaction(reaction).await?;
+            }
+            _ => {}
         }
         Ok(())
+    }
+
+    async fn fetch_message(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        message_id: Id<MessageMarker>,
+    ) -> Option<twilight_model::channel::Message> {
+        let response = self.http.message(channel_id, message_id).await.ok()?;
+        response.model().await.ok()
+    }
+
+    fn restore_refresh_state(&self, message_id: Id<MessageMarker>, entry: RefreshState) {
+        if let Ok(mut state) = self.refresh_state.lock() {
+            state.entry(message_id).or_insert(entry);
+        }
+    }
+
+    async fn handle_refresh_reaction(&self, reaction: &ReactionAdd) -> Result<()> {
+        if reaction.user_id == self.user_id {
+            return Ok(());
+        }
+        if reaction.message_author_id != Some(self.user_id) {
+            return Ok(());
+        }
+
+        let Some(message) = self
+            .fetch_message(reaction.channel_id, reaction.message_id)
+            .await
+        else {
+            return Ok(());
+        };
+
+        let original_user_id = self.extract_original_user_from_content(&message.content);
+        if original_user_id != Some(reaction.user_id) {
+            return Ok(());
+        }
+
+        let entry = match self.refresh_state.lock() {
+            Ok(mut state) => state.remove(&reaction.message_id),
+            Err(_) => return Ok(()),
+        };
+        let Some(entry) = entry else {
+            return Ok(());
+        };
+
+        let Some((parsed_source, mirrors)) = crate::media::get_mirrors(&entry.source_url) else {
+            self.restore_refresh_state(reaction.message_id, entry);
+            return Ok(());
+        };
+        if mirrors.len() < 2 {
+            self.restore_refresh_state(reaction.message_id, entry);
+            return Ok(());
+        }
+
+        let start_index = pick_next_index(mirrors, entry.current_host.as_deref());
+
+        let new_host = if entry.is_download {
+            self.refresh_download(
+                reaction,
+                original_user_id,
+                &entry,
+                &parsed_source,
+                mirrors,
+                start_index,
+            )
+            .await?
+        } else {
+            self.refresh_transform(
+                reaction,
+                original_user_id,
+                &parsed_source,
+                mirrors,
+                start_index,
+            )
+            .await?
+        };
+
+        if let Some(new_host) = new_host {
+            if let Ok(mut state) = self.refresh_state.lock() {
+                state.insert(
+                    reaction.message_id,
+                    RefreshState {
+                        source_url: entry.source_url,
+                        current_host: Some(new_host),
+                        is_download: entry.is_download,
+                        spoiler: entry.spoiler,
+                        created_at: Instant::now(),
+                    },
+                );
+            }
+        } else {
+            self.restore_refresh_state(reaction.message_id, entry);
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_download(
+        &self,
+        reaction: &ReactionAdd,
+        original_user_id: Option<Id<UserMarker>>,
+        entry: &RefreshState,
+        parsed_source: &url::Url,
+        mirrors: &[&str],
+        start_index: usize,
+    ) -> Result<Option<String>> {
+        let n = mirrors.len();
+        for offset in 0..n {
+            let idx = (start_index + offset) % n;
+            let mirror_host = mirrors[idx];
+            let Some(mirror_url) = crate::media::transform_to_host(parsed_source, mirror_host)
+            else {
+                continue;
+            };
+
+            match self.media_downloader.download(&mirror_url).await {
+                Ok(media_info) => {
+                    let (attachments, oversized) =
+                        Self::build_attachments(&media_info, entry.spoiler).await;
+                    if attachments.is_empty() {
+                        warn!(
+                            mirror_host,
+                            "Refresh mirror returned no usable attachments; trying next"
+                        );
+                        continue;
+                    }
+
+                    let content = Self::build_media_content(
+                        original_user_id,
+                        &entry.source_url,
+                        &media_info,
+                        None,
+                        &oversized,
+                    );
+
+                    if let Err(e) = self
+                        .http
+                        .update_message(reaction.channel_id, reaction.message_id)
+                        .content(Some(&content))
+                        .attachments(&attachments)
+                        .keep_attachment_ids(&[])
+                        .flags(MessageFlags::SUPPRESS_EMBEDS)
+                        .await
+                    {
+                        warn!(mirror_host, error = %e, "Failed to edit message during refresh");
+                        continue;
+                    }
+
+                    info!(mirror_host, "Refreshed media from new mirror");
+                    return Ok(Some(mirror_host.to_string()));
+                }
+                Err(e) => {
+                    warn!(mirror_host, error = %e, "Refresh download from mirror failed");
+                    continue;
+                }
+            }
+        }
+
+        warn!("All mirrors failed during refresh; leaving message unchanged");
+        Ok(None)
+    }
+
+    async fn refresh_transform(
+        &self,
+        reaction: &ReactionAdd,
+        original_user_id: Option<Id<UserMarker>>,
+        parsed_source: &url::Url,
+        mirrors: &[&str],
+        start_index: usize,
+    ) -> Result<Option<String>> {
+        let mirror_host = mirrors[start_index];
+        let Some(new_mirror_url) = crate::media::transform_to_host(parsed_source, mirror_host)
+        else {
+            return Ok(None);
+        };
+        let new_content = match original_user_id {
+            Some(uid) => format!("<@{uid}> {new_mirror_url}"),
+            None => new_mirror_url.clone(),
+        };
+
+        if let Err(e) = self
+            .http
+            .update_message(reaction.channel_id, reaction.message_id)
+            .content(Some(&new_content))
+            .await
+        {
+            warn!(mirror_host, error = %e, "Failed to swap mirror link during refresh");
+            return Ok(None);
+        }
+
+        info!(mirror_host, "Swapped mirror link during refresh");
+        Ok(Some(mirror_host.to_string()))
     }
 
     #[allow(clippy::single_match)]
@@ -481,12 +723,10 @@ impl DiscordBot {
                     "Posting transformed URL (transform-only mode)"
                 );
 
-                let content = match user_id {
-                    Some(uid) => format!("<@{uid}> {transformed_url}"),
-                    None => transformed_url,
-                };
-
-                if let Err(e) = self.http.create_message(channel_id).content(&content).await {
+                if let Err(e) = self
+                    .post_mirror_link(channel_id, user_id, &options.url, &transformed_url)
+                    .await
+                {
                     error!(
                         user_id = user_id.map(|id| id.get()),
                         channel_id = channel_id.get(),
@@ -646,19 +886,10 @@ impl DiscordBot {
         Ok(())
     }
 
-    async fn send_media_to_channel(
-        &self,
-        channel_id: &Id<ChannelMarker>,
-        user_id: Option<twilight_model::id::Id<twilight_model::id::marker::UserMarker>>,
+    async fn build_attachments(
         media_info: &crate::media::MediaInfo,
-        message: Option<String>,
         spoiler: bool,
-    ) -> Result<()> {
-        if media_info.files.is_empty() {
-            return Err(anyhow::anyhow!("No files to send"));
-        }
-
-        // Create attachments from in-memory files
+    ) -> (Vec<Attachment>, Vec<(String, u64)>) {
         let mut attachments = Vec::new();
         let mut oversized_files = Vec::new();
         let mut attachment_id = 1u64;
@@ -666,30 +897,18 @@ impl DiscordBot {
         for file in &media_info.files {
             let file_size = file.data.len() as u64;
 
-            debug!(
-                channel_id = channel_id.get(),
-                file_name = %file.filename,
-                file_size = file_size,
-                "Processing file"
-            );
+            debug!(file_name = %file.filename, file_size, "Processing file");
 
-            // Skip empty files
             if file_size == 0 {
-                warn!(
-                    channel_id = channel_id.get(),
-                    file_name = %file.filename,
-                    "Skipping empty file"
-                );
+                warn!(file_name = %file.filename, "Skipping empty file");
                 continue;
             }
 
-            // Discord has a 10MB file size limit for most servers
             #[allow(unused_variables)]
             let (file_data, file_size) = if file_size > 10_000_000 {
                 info!(
-                    channel_id = channel_id.get(),
                     file_name = %file.filename,
-                    file_size = file_size,
+                    file_size,
                     max_size_mb = 10u64,
                     "File exceeds size limit, attempting to resize"
                 );
@@ -714,7 +933,6 @@ impl DiscordBot {
                 match resize_result {
                     Ok(Ok(resized_data)) => {
                         info!(
-                            channel_id = channel_id.get(),
                             file_name = %file.filename,
                             original_size = file_size,
                             new_size = resized_data.len() as u64,
@@ -724,7 +942,6 @@ impl DiscordBot {
                     }
                     Ok(Err(e)) => {
                         warn!(
-                            channel_id = channel_id.get(),
                             file_name = %file.filename,
                             error = %e,
                             "Failed to resize file, marking as oversized"
@@ -733,12 +950,7 @@ impl DiscordBot {
                         continue;
                     }
                     Err(e) => {
-                        warn!(
-                            channel_id = channel_id.get(),
-                            file_name = %file.filename,
-                            error = %e,
-                            "Resize task failed"
-                        );
+                        warn!(file_name = %file.filename, error = %e, "Resize task failed");
                         oversized_files.push((file.filename.clone(), file_size));
                         continue;
                     }
@@ -759,31 +971,27 @@ impl DiscordBot {
             attachments.push(attachment);
         }
 
-        // If all files are oversized, send transformed URL or original URL
-        if attachments.is_empty() && !oversized_files.is_empty() {
-            let url = self
-                .media_downloader
-                .get_transformed_url(&media_info.url)
-                .unwrap_or_else(|| media_info.url.clone());
-            self.http.create_message(*channel_id).content(&url).await?;
-            return Ok(());
-        }
+        (attachments, oversized_files)
+    }
 
-        // Build message content with metadata
-        let mut content = if let Some(user_id) = user_id {
-            format!("<@{}>", user_id)
-        } else {
-            "".to_string()
+    fn build_media_content(
+        user_id: Option<Id<UserMarker>>,
+        url: &str,
+        media_info: &crate::media::MediaInfo,
+        message: Option<&str>,
+        oversized_files: &[(String, u64)],
+    ) -> String {
+        let mut content = match user_id {
+            Some(uid) => format!("<@{uid}>"),
+            None => String::new(),
         };
 
-        content.push_str(&format!("\n{}", media_info.url));
+        content.push_str(&format!("\n{url}"));
 
-        // Add author if available
         if let Some(author) = &media_info.metadata.author {
             content.push_str(&format!("\n👤 Author: {author}"));
         }
 
-        // Add likes if available
         if let Some(likes) = media_info.metadata.likes {
             content.push_str(&format!(
                 "\n❤️ Likes: {}",
@@ -791,22 +999,19 @@ impl DiscordBot {
             ));
         }
 
-        // Add title if available
         if !media_info.metadata.title.is_empty()
             && media_info.metadata.title != "Unknown Title"
             && media_info.metadata.title != "Unknown Media"
         {
-            content.push_str(&format!("\n> {}", media_info.metadata.title,));
+            content.push_str(&format!("\n> {}", media_info.metadata.title));
         }
 
-        // Add user message if provided
         if let Some(message_content) = message {
             if !message_content.is_empty() {
                 content.push_str(&format!("\n\n{message_content}"));
             }
         }
 
-        // Add warning about oversized files if some were skipped
         if !oversized_files.is_empty() {
             let oversized_names = oversized_files
                 .iter()
@@ -816,7 +1021,40 @@ impl DiscordBot {
             content.push_str(&format!("\nSkipped oversized files: {oversized_names}"));
         }
 
-        // Send message with multiple attachments
+        content
+    }
+
+    async fn send_media_to_channel(
+        &self,
+        channel_id: &Id<ChannelMarker>,
+        user_id: Option<twilight_model::id::Id<twilight_model::id::marker::UserMarker>>,
+        media_info: &crate::media::MediaInfo,
+        message: Option<String>,
+        spoiler: bool,
+    ) -> Result<()> {
+        if media_info.files.is_empty() {
+            return Err(anyhow::anyhow!("No files to send"));
+        }
+
+        let (attachments, oversized_files) = Self::build_attachments(media_info, spoiler).await;
+
+        if attachments.is_empty() && !oversized_files.is_empty() {
+            let url = self
+                .media_downloader
+                .get_transformed_url(&media_info.url)
+                .unwrap_or_else(|| media_info.url.clone());
+            self.http.create_message(*channel_id).content(&url).await?;
+            return Ok(());
+        }
+
+        let content = Self::build_media_content(
+            user_id,
+            &media_info.url,
+            media_info,
+            message.as_deref(),
+            &oversized_files,
+        );
+
         debug!(
             channel_id = channel_id.get(),
             attachment_count = attachments.len(),
@@ -836,7 +1074,6 @@ impl DiscordBot {
             .flags(MessageFlags::SUPPRESS_EMBEDS)
             .await?;
 
-        // Add X reaction for easy deletion
         if let Ok(msg) = message.model().await {
             let _ = self
                 .http
@@ -846,6 +1083,85 @@ impl DiscordBot {
                     &RequestReactionType::Unicode { name: "❌" },
                 )
                 .await;
+
+            if crate::media::get_mirrors(&media_info.url).is_some() {
+                let _ = self
+                    .http
+                    .create_reaction(
+                        msg.channel_id,
+                        msg.id,
+                        &RequestReactionType::Unicode {
+                            name: REFRESH_EMOJI,
+                        },
+                    )
+                    .await;
+
+                let state = RefreshState {
+                    source_url: media_info.url.clone(),
+                    current_host: None,
+                    is_download: true,
+                    spoiler,
+                    created_at: Instant::now(),
+                };
+                if let Ok(mut state_map) = self.refresh_state.lock() {
+                    state_map.insert(msg.id, state);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn post_mirror_link(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        user_id: Option<Id<UserMarker>>,
+        source_url: &str,
+        mirror_url: &str,
+    ) -> Result<()> {
+        let content = match user_id {
+            Some(uid) => format!("<@{uid}> {mirror_url}"),
+            None => mirror_url.to_string(),
+        };
+
+        let message = self
+            .http
+            .create_message(channel_id)
+            .content(&content)
+            .await?;
+
+        if let Ok(msg) = message.model().await {
+            let _ = self
+                .http
+                .create_reaction(
+                    msg.channel_id,
+                    msg.id,
+                    &RequestReactionType::Unicode { name: "❌" },
+                )
+                .await;
+            let _ = self
+                .http
+                .create_reaction(
+                    msg.channel_id,
+                    msg.id,
+                    &RequestReactionType::Unicode {
+                        name: REFRESH_EMOJI,
+                    },
+                )
+                .await;
+
+            let first_host = crate::media::get_mirrors(source_url)
+                .and_then(|(_, mirrors)| mirrors.first().copied().map(String::from));
+            let state = RefreshState {
+                source_url: source_url.to_string(),
+                current_host: first_host,
+                is_download: false,
+                spoiler: false,
+                created_at: Instant::now(),
+            };
+            if let Ok(mut state_map) = self.refresh_state.lock() {
+                state_map.insert(msg.id, state);
+            }
         }
 
         Ok(())
@@ -893,6 +1209,17 @@ pub async fn run_with_config(config: ConfigManager) -> Result<()> {
 
     let (bot, shard) = DiscordBot::new_with_config(token, config).await?;
     bot.run(shard).await
+}
+
+fn pick_next_index(mirrors: &[&str], current_host: Option<&str>) -> usize {
+    match current_host {
+        Some(host) => mirrors
+            .iter()
+            .position(|m| *m == host)
+            .map(|pos| (pos + 1) % mirrors.len())
+            .unwrap_or(0),
+        None => 0,
+    }
 }
 
 struct EmbedCommandOptions {

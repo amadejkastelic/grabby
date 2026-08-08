@@ -15,26 +15,45 @@ use gallery_dl::GalleryDlDownloader;
 use tracing::{info, warn};
 use ytdlp::YtDlpDownloader;
 
-const URL_TRANSFORMS: &[(&str, &str)] = &[
-    ("instagram.com", "kkinstagram.com"),
-    ("instagr.am", "kkinstagram.com"),
-    ("tiktok.com", "kktiktok.com"),
-    ("x.com", "fxtwitter.com"),
-    ("twitter.com", "fxtwitter.com"),
-    ("reddit.com", "vxreddit.com"),
+const URL_TRANSFORMS: &[(&str, &[&str])] = &[
+    (
+        "instagram.com",
+        &["kkinstagram.com", "ddinstagram.com", "oginstagram.com"],
+    ),
+    (
+        "instagr.am",
+        &["kkinstagram.com", "ddinstagram.com", "oginstagram.com"],
+    ),
+    ("tiktok.com", &["kktiktok.com", "vxtiktok.com"]),
+    ("x.com", &["fxtwitter.com", "vxtwitter.com", "fixupx.com"]),
+    (
+        "twitter.com",
+        &["fxtwitter.com", "vxtwitter.com", "fixupx.com"],
+    ),
+    ("reddit.com", &["vxreddit.com", "rxddit.com"]),
 ];
 
-pub fn get_transformed_url(url: &str) -> Option<String> {
+pub fn get_mirrors(url: &str) -> Option<(url::Url, &'static [&'static str])> {
     let parsed = url::Url::parse(url).ok()?;
     let host = parsed.host_str()?.to_lowercase();
-    for (pattern, replacement) in URL_TRANSFORMS {
+    for (pattern, mirrors) in URL_TRANSFORMS {
         if host == *pattern || host.ends_with(&format!(".{pattern}")) {
-            let mut new_url = parsed.clone();
-            new_url.set_host(Some(replacement)).ok()?;
-            return Some(new_url.to_string());
+            return Some((parsed, mirrors));
         }
     }
     None
+}
+
+pub fn transform_to_host(parsed: &url::Url, host: &str) -> Option<String> {
+    let mut new_url = parsed.clone();
+    new_url.set_host(Some(host)).ok()?;
+    Some(new_url.to_string())
+}
+
+pub fn get_transformed_url(url: &str) -> Option<String> {
+    let (parsed, mirrors) = get_mirrors(url)?;
+    let first = *mirrors.first()?;
+    transform_to_host(&parsed, first)
 }
 
 pub struct MediaDownloader {
@@ -247,5 +266,52 @@ mod tests {
     fn test_transform_invalid_url() {
         assert_eq!(get_transformed_url("not-a-url"), None);
         assert_eq!(get_transformed_url(""), None);
+    }
+
+    #[test]
+    fn test_get_mirrors_x_returns_all_candidates() {
+        let (_, mirrors) = get_mirrors("https://x.com/user/status/123").unwrap();
+        assert_eq!(mirrors, &["fxtwitter.com", "vxtwitter.com", "fixupx.com"]);
+    }
+
+    #[test]
+    fn test_get_mirrors_reddit_two_candidates() {
+        let (_, mirrors) = get_mirrors("https://www.reddit.com/r/test/").unwrap();
+        assert_eq!(mirrors, &["vxreddit.com", "rxddit.com"]);
+    }
+
+    #[test]
+    fn test_get_mirrors_tiktok_subdomain() {
+        let (_, mirrors) = get_mirrors("https://vm.tiktok.com/ZMhAbCdEf/").unwrap();
+        assert_eq!(mirrors, &["kktiktok.com", "vxtiktok.com"]);
+    }
+
+    #[test]
+    fn test_get_mirrors_no_match() {
+        assert!(get_mirrors("https://example.com/video.mp4").is_none());
+    }
+
+    #[test]
+    fn test_get_mirrors_invalid_url() {
+        assert!(get_mirrors("not-a-url").is_none());
+        assert!(get_mirrors("").is_none());
+    }
+
+    #[test]
+    fn test_transform_to_host_basic() {
+        let parsed = url::Url::parse("https://x.com/user/status/123").unwrap();
+        assert_eq!(
+            transform_to_host(&parsed, "vxtwitter.com"),
+            Some("https://vxtwitter.com/user/status/123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_to_host_preserves_query() {
+        let parsed = url::Url::parse("https://reddit.com/r/test?t=all&sort=new").unwrap();
+        assert_eq!(
+            transform_to_host(&parsed, "rxddit.com"),
+            Some("https://rxddit.com/r/test?t=all&sort=new".to_string())
+        );
     }
 }
