@@ -12,6 +12,9 @@ pkgs.mkShell {
     pkg-config
     openssl
 
+    # cargo upgrade
+    cargo-edit
+
     yt-dlp
     ffmpeg
     gallery-dl
