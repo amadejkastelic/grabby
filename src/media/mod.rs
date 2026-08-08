@@ -24,13 +24,23 @@ const URL_TRANSFORMS: &[(&str, &[&str])] = &[
         "instagr.am",
         &["kkinstagram.com", "d.oginstagram.com", "uuinstagram.com"],
     ),
-    ("tiktok.com", &["kktiktok.com", "vxtiktok.com"]),
+    (
+        "tiktok.com",
+        &["kktiktok.com", "vxtiktok.com", "tnktok.com"],
+    ),
     ("x.com", &["fxtwitter.com", "vxtwitter.com", "fixupx.com"]),
     (
         "twitter.com",
         &["fxtwitter.com", "vxtwitter.com", "fixupx.com"],
     ),
     ("reddit.com", &["vxreddit.com", "rxddit.com"]),
+    ("bsky.app", &["fxbsky.app"]),
+    ("pixiv.net", &["phixiv.net"]),
+    ("youtube.com", &["koutube.com"]),
+    ("youtu.be", &["koutube.com"]),
+    ("bilibili.com", &["vxbilibili.com"]),
+    ("b23.tv", &["vxbilibili.com"]),
+    ("tumblr.com", &["tpmblr.com"]),
 ];
 
 pub fn get_mirrors(url: &str) -> Option<(url::Url, &'static [&'static str])> {
@@ -238,6 +248,62 @@ mod tests {
     }
 
     #[test]
+    fn test_transform_bsky() {
+        assert_eq!(
+            get_transformed_url("https://bsky.app/profile/x"),
+            Some("https://fxbsky.app/profile/x".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_pixiv() {
+        assert_eq!(
+            get_transformed_url("https://www.pixiv.net/artworks/123"),
+            Some("https://phixiv.net/artworks/123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_youtube() {
+        assert_eq!(
+            get_transformed_url("https://www.youtube.com/watch?v=abc"),
+            Some("https://koutube.com/watch?v=abc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_youtube_short() {
+        assert_eq!(
+            get_transformed_url("https://youtu.be/abc"),
+            Some("https://koutube.com/abc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_bilibili() {
+        assert_eq!(
+            get_transformed_url("https://www.bilibili.com/video/BV1xx"),
+            Some("https://vxbilibili.com/video/BV1xx".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_bilibili_short() {
+        assert_eq!(
+            get_transformed_url("https://b23.tv/abc"),
+            Some("https://vxbilibili.com/abc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_tumblr_blog_subdomain() {
+        assert_eq!(
+            get_transformed_url("https://foo.tumblr.com/post/123"),
+            Some("https://tpmblr.com/post/123".to_string())
+        );
+    }
+
+    #[test]
     fn test_transform_no_match() {
         assert_eq!(get_transformed_url("https://example.com/video.mp4"), None);
     }
@@ -283,7 +349,19 @@ mod tests {
     #[test]
     fn test_get_mirrors_tiktok_subdomain() {
         let (_, mirrors) = get_mirrors("https://vm.tiktok.com/ZMhAbCdEf/").unwrap();
-        assert_eq!(mirrors, &["kktiktok.com", "vxtiktok.com"]);
+        assert_eq!(mirrors, &["kktiktok.com", "vxtiktok.com", "tnktok.com"]);
+    }
+
+    #[test]
+    fn test_get_mirrors_single_candidate() {
+        let (_, mirrors) = get_mirrors("https://bsky.app/profile/x").unwrap();
+        assert_eq!(mirrors, &["fxbsky.app"]);
+    }
+
+    #[test]
+    fn test_get_mirrors_tumblr_subdomain() {
+        let (_, mirrors) = get_mirrors("https://foo.tumblr.com/post/123").unwrap();
+        assert_eq!(mirrors, &["tpmblr.com"]);
     }
 
     #[test]

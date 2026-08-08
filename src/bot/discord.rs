@@ -1084,7 +1084,9 @@ impl DiscordBot {
                 )
                 .await;
 
-            if crate::media::get_mirrors(&media_info.url).is_some() {
+            if crate::media::get_mirrors(&media_info.url)
+                .is_some_and(|(_, mirrors)| mirrors.len() >= 2)
+            {
                 let _ = self
                     .http
                     .create_reaction(
@@ -1139,28 +1141,32 @@ impl DiscordBot {
                     &RequestReactionType::Unicode { name: "❌" },
                 )
                 .await;
-            let _ = self
-                .http
-                .create_reaction(
-                    msg.channel_id,
-                    msg.id,
-                    &RequestReactionType::Unicode {
-                        name: REFRESH_EMOJI,
-                    },
-                )
-                .await;
 
-            let first_host = crate::media::get_mirrors(source_url)
-                .and_then(|(_, mirrors)| mirrors.first().copied().map(String::from));
-            let state = RefreshState {
-                source_url: source_url.to_string(),
-                current_host: first_host,
-                is_download: false,
-                spoiler: false,
-                created_at: Instant::now(),
-            };
-            if let Ok(mut state_map) = self.refresh_state.lock() {
-                state_map.insert(msg.id, state);
+            if let Some((_, mirrors)) =
+                crate::media::get_mirrors(source_url).filter(|(_, mirrors)| mirrors.len() >= 2)
+            {
+                let _ = self
+                    .http
+                    .create_reaction(
+                        msg.channel_id,
+                        msg.id,
+                        &RequestReactionType::Unicode {
+                            name: REFRESH_EMOJI,
+                        },
+                    )
+                    .await;
+
+                let first_host = mirrors.first().copied().map(String::from);
+                let state = RefreshState {
+                    source_url: source_url.to_string(),
+                    current_host: first_host,
+                    is_download: false,
+                    spoiler: false,
+                    created_at: Instant::now(),
+                };
+                if let Ok(mut state_map) = self.refresh_state.lock() {
+                    state_map.insert(msg.id, state);
+                }
             }
         }
 
