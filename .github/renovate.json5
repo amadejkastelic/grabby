@@ -1,0 +1,40 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  onboarding: false,
+  requireConfig: "optional",
+
+  // flake.lock is handled by update-flake.yml
+  nix: { enabled: false },
+
+  labels: ["automation", "update"],
+
+  packageRules: [
+    {
+      description: "Group all GitHub Action updates into a single PR",
+      matchManagers: ["github-actions"],
+      groupName: "github-actions",
+      addLabels: ["github-actions"],
+    },
+    {
+      description: "Auto-merge minor/patch action bumps; majors need review",
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeStrategy: "rebase",
+    },
+    {
+      description: "Keep the twilight ecosystem crates in lockstep (shared 0.x line)",
+      matchManagers: ["cargo"],
+      matchPackageNames: ["/^twilight-/"],
+      groupName: "twilight",
+    },
+    {
+      description: "Auto-merge minor/patch cargo bumps; majors need review",
+      matchManagers: ["cargo"],
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeStrategy: "rebase",
+    },
+  ],
+}
