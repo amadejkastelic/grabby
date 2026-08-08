@@ -29,7 +29,7 @@ jobs:
             os: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Get tag
         id: get-tag
@@ -40,12 +40,12 @@ jobs:
 
       - name: Upload tag artifact
         if: matrix.arch == 'x86_64-linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tag
           path: tag.txt
 
-      - uses: nixbuild/nix-quick-install-action@v34
+      - uses: nixbuild/nix-quick-install-action@v35
         with:
           nix_on_tmpfs: true
 
@@ -57,7 +57,7 @@ jobs:
           echo "flake_hash=${flake_hash}" >> $GITHUB_ENV
 
       - name: Cache Nix Store
-        uses: nix-community/cache-nix-action@v6
+        uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ env.flake_hash }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -74,7 +74,7 @@ jobs:
           echo "path=$(realpath result)" >> $GITHUB_OUTPUT
 
       - name: Upload image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: container-${{ matrix.arch }}
           path: ${{ steps.build.outputs.path }}
@@ -90,7 +90,7 @@ jobs:
       packages: write
     steps:
       - name: Download tag artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tag
 
@@ -101,19 +101,19 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Download x86_64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: container-x86_64-linux
           path: ./x86_64-linux-image
 
       - name: Download aarch64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: container-aarch64-linux
           path: ./aarch64-linux-image
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -151,7 +151,7 @@ jobs:
     if: ${{ github.event_name == 'push' || inputs.registry == 'both' || inputs.registry == 'dockerhub' }}
     steps:
       - name: Download tag artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tag
 
@@ -162,19 +162,19 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Download x86_64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: container-x86_64-linux
           path: ./x86_64-linux-image
 
       - name: Download aarch64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: container-aarch64-linux
           path: ./aarch64-linux-image
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v4
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
