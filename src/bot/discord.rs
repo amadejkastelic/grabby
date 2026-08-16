@@ -17,7 +17,7 @@ use twilight_model::{
             application_command::CommandData, Interaction, InteractionData, InteractionType,
         },
     },
-    channel::message::{EmojiReactionType, MessageFlags},
+    channel::message::{EmojiReactionType, MessageFlags, MessageReference, MessageReferenceType},
     gateway::payload::incoming::{MessageCreate, ReactionAdd},
     http::{
         attachment::Attachment,
@@ -234,6 +234,8 @@ impl DiscordBot {
             return Ok(());
         }
 
+        let reply_to = reply_target(msg.reference.as_ref());
+
         // Check if this is an auto-embed channel
         if let Some(guild_id) = msg.guild_id {
             let server_config = self.config.get_server_config(&guild_id.to_string());
@@ -281,6 +283,7 @@ impl DiscordBot {
                                     Some(msg.author.id),
                                     &url,
                                     &transformed_url,
+                                    reply_to,
                                 )
                                 .await;
                             let _ = self.http.delete_message(msg.channel_id, msg.id).await;
@@ -315,6 +318,7 @@ impl DiscordBot {
                                         &media_info,
                                         None,
                                         false,
+                                        reply_to,
                                     )
                                     .await
                                 {
@@ -355,6 +359,7 @@ impl DiscordBot {
                                             Some(msg.author.id),
                                             &url,
                                             &transformed_url,
+                                            reply_to,
                                         )
                                         .await;
                                     let _ = self.http.delete_message(msg.channel_id, msg.id).await;
@@ -724,7 +729,7 @@ impl DiscordBot {
                 );
 
                 if let Err(e) = self
-                    .post_mirror_link(channel_id, user_id, &options.url, &transformed_url)
+                    .post_mirror_link(channel_id, user_id, &options.url, &transformed_url, None)
                     .await
                 {
                     error!(
@@ -808,6 +813,7 @@ impl DiscordBot {
                             &media_info,
                             options.message,
                             options.spoiler,
+                            None,
                         )
                         .await
                     {
@@ -1031,6 +1037,7 @@ impl DiscordBot {
         media_info: &crate::media::MediaInfo,
         message: Option<String>,
         spoiler: bool,
+        reply_to: Option<Id<MessageMarker>>,
     ) -> Result<()> {
         if media_info.files.is_empty() {
             return Err(anyhow::anyhow!("No files to send"));
@@ -1043,7 +1050,11 @@ impl DiscordBot {
                 .media_downloader
                 .get_transformed_url(&media_info.url)
                 .unwrap_or_else(|| media_info.url.clone());
-            self.http.create_message(*channel_id).content(&url).await?;
+            let mut request = self.http.create_message(*channel_id).content(&url);
+            if let Some(reply_to) = reply_to {
+                request = request.reply(reply_to).fail_if_not_exists(false);
+            }
+            request.await?;
             return Ok(());
         }
 
@@ -1066,13 +1077,18 @@ impl DiscordBot {
             "Attachment filenames"
         );
 
-        let message = self
+        let mut request = self
             .http
             .create_message(*channel_id)
             .content(&content)
             .attachments(&attachments)
-            .flags(MessageFlags::SUPPRESS_EMBEDS)
-            .await?;
+            .flags(MessageFlags::SUPPRESS_EMBEDS);
+
+        if let Some(reply_to) = reply_to {
+            request = request.reply(reply_to).fail_if_not_exists(false);
+        }
+
+        let message = request.await?;
 
         if let Ok(msg) = message.model().await {
             let _ = self
@@ -1120,17 +1136,20 @@ impl DiscordBot {
         user_id: Option<Id<UserMarker>>,
         source_url: &str,
         mirror_url: &str,
+        reply_to: Option<Id<MessageMarker>>,
     ) -> Result<()> {
         let content = match user_id {
             Some(uid) => format!("<@{uid}> {mirror_url}"),
             None => mirror_url.to_string(),
         };
 
-        let message = self
-            .http
-            .create_message(channel_id)
-            .content(&content)
-            .await?;
+        let mut request = self.http.create_message(channel_id).content(&content);
+
+        if let Some(reply_to) = reply_to {
+            request = request.reply(reply_to).fail_if_not_exists(false);
+        }
+
+        let message = request.await?;
 
         if let Ok(msg) = message.model().await {
             let _ = self
@@ -1225,6 +1244,47 @@ fn pick_next_index(mirrors: &[&str], current_host: Option<&str>) -> usize {
             .map(|pos| (pos + 1) % mirrors.len())
             .unwrap_or(0),
         None => 0,
+    }
+}
+
+fn reply_target(reference: Option<&MessageReference>) -> Option<Id<MessageMarker>> {
+    reference
+        .filter(|reference| matches!(reference.kind, MessageReferenceType::Default))
+        .and_then(|reference| reference.message_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference(
+        kind: MessageReferenceType,
+        message_id: Option<Id<MessageMarker>>,
+    ) -> MessageReference {
+        MessageReference {
+            channel_id: None,
+            guild_id: None,
+            kind,
+            message_id,
+            fail_if_not_exists: None,
+        }
+    }
+
+    #[test]
+    fn reply_target_returns_replied_to_message() {
+        let reply = reference(MessageReferenceType::Default, Some(Id::new(1234)));
+
+        assert_eq!(reply_target(Some(&reply)), Some(Id::new(1234)));
+    }
+
+    #[test]
+    fn reply_target_ignores_forwards_and_missing_targets() {
+        let forward = reference(MessageReferenceType::Forward, Some(Id::new(1234)));
+        let no_target = reference(MessageReferenceType::Default, None);
+
+        assert_eq!(reply_target(Some(&forward)), None);
+        assert_eq!(reply_target(Some(&no_target)), None);
+        assert_eq!(reply_target(None), None);
     }
 }
 

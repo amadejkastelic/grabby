@@ -11,6 +11,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 - **In-Memory Processing**: Downloads media directly to memory and uploads to Discord (no disk I/O)
 - **Slash Command**: `/embed` command with options for URL, custom message, and spoiler mode
 - **Auto-Embed Channels**: Automatically processes URLs in configured channels without commands
+- **Reply Preservation**: When an auto-embedded message was a reply, the replacement post replies to the same message so the reply chain survives the original message being deleted
 - **Metadata Extraction**: Displays title, author, likes, and original URL with downloaded files
 - **File Size Limits**: Enforces Discord's 25MB file size limit with user feedback
 - **Auto-Resize**: Automatically resizes oversized media files using ffmpeg to fit Discord's 25MB limit
