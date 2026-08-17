@@ -56,8 +56,6 @@ const REFRESH_STATE_SWEEP_INTERVAL: Duration = Duration::from_secs(600);
 struct RefreshState {
     source_url: String,
     current_host: Option<String>,
-    is_download: bool,
-    spoiler: bool,
     created_at: Instant,
 }
 
@@ -499,26 +497,15 @@ impl DiscordBot {
 
         let start_index = pick_next_index(mirrors, entry.current_host.as_deref());
 
-        let new_host = if entry.is_download {
-            self.refresh_download(
-                reaction,
-                original_user_id,
-                &entry,
-                &parsed_source,
-                mirrors,
-                start_index,
-            )
-            .await?
-        } else {
-            self.refresh_transform(
+        let new_host = self
+            .refresh_transform(
                 reaction,
                 original_user_id,
                 &parsed_source,
                 mirrors,
                 start_index,
             )
-            .await?
-        };
+            .await?;
 
         if let Some(new_host) = new_host {
             if let Ok(mut state) = self.refresh_state.lock() {
@@ -527,8 +514,6 @@ impl DiscordBot {
                     RefreshState {
                         source_url: entry.source_url,
                         current_host: Some(new_host),
-                        is_download: entry.is_download,
-                        spoiler: entry.spoiler,
                         created_at: Instant::now(),
                     },
                 );
@@ -538,71 +523,6 @@ impl DiscordBot {
         }
 
         Ok(())
-    }
-
-    async fn refresh_download(
-        &self,
-        reaction: &ReactionAdd,
-        original_user_id: Option<Id<UserMarker>>,
-        entry: &RefreshState,
-        parsed_source: &url::Url,
-        mirrors: &[&str],
-        start_index: usize,
-    ) -> Result<Option<String>> {
-        let n = mirrors.len();
-        for offset in 0..n {
-            let idx = (start_index + offset) % n;
-            let mirror_host = mirrors[idx];
-            let Some(mirror_url) = crate::media::transform_to_host(parsed_source, mirror_host)
-            else {
-                continue;
-            };
-
-            match self.media_downloader.download(&mirror_url).await {
-                Ok(media_info) => {
-                    let (attachments, oversized) =
-                        Self::build_attachments(&media_info, entry.spoiler).await;
-                    if attachments.is_empty() {
-                        warn!(
-                            mirror_host,
-                            "Refresh mirror returned no usable attachments; trying next"
-                        );
-                        continue;
-                    }
-
-                    let content = Self::build_media_content(
-                        original_user_id,
-                        &entry.source_url,
-                        &media_info,
-                        None,
-                        &oversized,
-                    );
-
-                    if let Err(e) = self
-                        .http
-                        .update_message(reaction.channel_id, reaction.message_id)
-                        .content(Some(&content))
-                        .attachments(&attachments)
-                        .keep_attachment_ids(&[])
-                        .flags(MessageFlags::SUPPRESS_EMBEDS)
-                        .await
-                    {
-                        warn!(mirror_host = %mirror_host, error = %e, "Failed to edit message during refresh");
-                        continue;
-                    }
-
-                    info!(mirror_host = %mirror_host, "Refreshed media from new mirror");
-                    return Ok(Some(mirror_host.to_string()));
-                }
-                Err(e) => {
-                    warn!(mirror_host = %mirror_host, error = %e, "Refresh download from mirror failed");
-                    continue;
-                }
-            }
-        }
-
-        warn!("All mirrors failed during refresh; leaving message unchanged");
-        Ok(None)
     }
 
     async fn refresh_transform(
@@ -1099,32 +1019,6 @@ impl DiscordBot {
                     &RequestReactionType::Unicode { name: "❌" },
                 )
                 .await;
-
-            if crate::media::get_mirrors(&media_info.url)
-                .is_some_and(|(_, mirrors)| mirrors.len() >= 2)
-            {
-                let _ = self
-                    .http
-                    .create_reaction(
-                        msg.channel_id,
-                        msg.id,
-                        &RequestReactionType::Unicode {
-                            name: REFRESH_EMOJI,
-                        },
-                    )
-                    .await;
-
-                let state = RefreshState {
-                    source_url: media_info.url.clone(),
-                    current_host: None,
-                    is_download: true,
-                    spoiler,
-                    created_at: Instant::now(),
-                };
-                if let Ok(mut state_map) = self.refresh_state.lock() {
-                    state_map.insert(msg.id, state);
-                }
-            }
         }
 
         Ok(())
@@ -1179,8 +1073,6 @@ impl DiscordBot {
                 let state = RefreshState {
                     source_url: source_url.to_string(),
                     current_host: first_host,
-                    is_download: false,
-                    spoiler: false,
                     created_at: Instant::now(),
                 };
                 if let Ok(mut state_map) = self.refresh_state.lock() {
