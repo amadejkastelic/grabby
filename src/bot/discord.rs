@@ -48,6 +48,14 @@ fn clean_error_message(error: &anyhow::Error) -> String {
     "Download failed".to_string()
 }
 
+fn spoiler_wrap(content: &str, spoiler: bool) -> String {
+    if spoiler {
+        format!("||{content}||")
+    } else {
+        content.to_string()
+    }
+}
+
 const REFRESH_EMOJI: &str = "🔄";
 const REFRESH_STATE_TTL: Duration = Duration::from_secs(3600);
 const REFRESH_STATE_SWEEP_INTERVAL: Duration = Duration::from_secs(600);
@@ -56,6 +64,7 @@ const REFRESH_STATE_SWEEP_INTERVAL: Duration = Duration::from_secs(600);
 struct RefreshState {
     source_url: String,
     current_host: Option<String>,
+    spoiler: bool,
     created_at: Instant,
 }
 
@@ -282,6 +291,7 @@ impl DiscordBot {
                                     &url,
                                     &transformed_url,
                                     reply_to,
+                                    false,
                                 )
                                 .await;
                             let _ = self.http.delete_message(msg.channel_id, msg.id).await;
@@ -358,6 +368,7 @@ impl DiscordBot {
                                             &url,
                                             &transformed_url,
                                             reply_to,
+                                            false,
                                         )
                                         .await;
                                     let _ = self.http.delete_message(msg.channel_id, msg.id).await;
@@ -504,6 +515,7 @@ impl DiscordBot {
                 &parsed_source,
                 mirrors,
                 start_index,
+                entry.spoiler,
             )
             .await?;
 
@@ -514,6 +526,7 @@ impl DiscordBot {
                     RefreshState {
                         source_url: entry.source_url,
                         current_host: Some(new_host),
+                        spoiler: entry.spoiler,
                         created_at: Instant::now(),
                     },
                 );
@@ -532,6 +545,7 @@ impl DiscordBot {
         parsed_source: &url::Url,
         mirrors: &[&str],
         start_index: usize,
+        spoiler: bool,
     ) -> Result<Option<String>> {
         let mirror_host = mirrors[start_index];
         let Some(new_mirror_url) = crate::media::transform_to_host(parsed_source, mirror_host)
@@ -539,8 +553,8 @@ impl DiscordBot {
             return Ok(None);
         };
         let new_content = match original_user_id {
-            Some(uid) => format!("<@{uid}> {new_mirror_url}"),
-            None => new_mirror_url.clone(),
+            Some(uid) => format!("<@{uid}> {}", spoiler_wrap(&new_mirror_url, spoiler)),
+            None => spoiler_wrap(&new_mirror_url, spoiler),
         };
 
         if let Err(e) = self
@@ -649,7 +663,14 @@ impl DiscordBot {
                 );
 
                 if let Err(e) = self
-                    .post_mirror_link(channel_id, user_id, &options.url, &transformed_url, None)
+                    .post_mirror_link(
+                        channel_id,
+                        user_id,
+                        &options.url,
+                        &transformed_url,
+                        None,
+                        options.spoiler,
+                    )
                     .await
                 {
                     error!(
@@ -763,13 +784,14 @@ impl DiscordBot {
                     error = %e,
                     "Failed to download media"
                 );
-                let message = if let Some(transformed_url) =
+                let url = if let Some(transformed_url) =
                     self.media_downloader.get_transformed_url(&options.url)
                 {
                     transformed_url
                 } else {
                     options.url.clone()
                 };
+                let message = spoiler_wrap(&url, options.spoiler);
                 let _ = self.followup_message(interaction, &message).await;
             }
         }
@@ -970,7 +992,8 @@ impl DiscordBot {
                 .media_downloader
                 .get_transformed_url(&media_info.url)
                 .unwrap_or_else(|| media_info.url.clone());
-            let mut request = self.http.create_message(*channel_id).content(&url);
+            let content = spoiler_wrap(&url, spoiler);
+            let mut request = self.http.create_message(*channel_id).content(&content);
             if let Some(reply_to) = reply_to {
                 request = request.reply(reply_to).fail_if_not_exists(false);
             }
@@ -1031,10 +1054,11 @@ impl DiscordBot {
         source_url: &str,
         mirror_url: &str,
         reply_to: Option<Id<MessageMarker>>,
+        spoiler: bool,
     ) -> Result<()> {
         let content = match user_id {
-            Some(uid) => format!("<@{uid}> {mirror_url}"),
-            None => mirror_url.to_string(),
+            Some(uid) => format!("<@{uid}> {}", spoiler_wrap(mirror_url, spoiler)),
+            None => spoiler_wrap(mirror_url, spoiler),
         };
 
         let mut request = self.http.create_message(channel_id).content(&content);
@@ -1073,6 +1097,7 @@ impl DiscordBot {
                 let state = RefreshState {
                     source_url: source_url.to_string(),
                     current_host: first_host,
+                    spoiler,
                     created_at: Instant::now(),
                 };
                 if let Ok(mut state_map) = self.refresh_state.lock() {
@@ -1177,6 +1202,22 @@ mod tests {
         assert_eq!(reply_target(Some(&forward)), None);
         assert_eq!(reply_target(Some(&no_target)), None);
         assert_eq!(reply_target(None), None);
+    }
+
+    #[test]
+    fn spoiler_wrap_hides_content_when_spoilered() {
+        assert_eq!(
+            spoiler_wrap("https://fxtwitter.com/a/1", true),
+            "||https://fxtwitter.com/a/1||"
+        );
+    }
+
+    #[test]
+    fn spoiler_wrap_keeps_content_visible_when_not_spoilered() {
+        assert_eq!(
+            spoiler_wrap("https://fxtwitter.com/a/1", false),
+            "https://fxtwitter.com/a/1"
+        );
     }
 }
 
