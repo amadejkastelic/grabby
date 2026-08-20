@@ -18,11 +18,11 @@ use ytdlp::YtDlpDownloader;
 const URL_TRANSFORMS: &[(&str, &[&str])] = &[
     (
         "instagram.com",
-        &["kkinstagram.com", "d.oginstagram.com", "uuinstagram.com"],
+        &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"],
     ),
     (
         "instagr.am",
-        &["kkinstagram.com", "d.oginstagram.com", "uuinstagram.com"],
+        &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"],
     ),
     (
         "tiktok.com",
@@ -54,8 +54,44 @@ pub fn get_mirrors(url: &str) -> Option<(url::Url, &'static [&'static str])> {
     None
 }
 
+const TRACKING_QUERY_PARAMS: &[&str] = &[
+    "igsh", "igshid", "fbclid", "gclid", "mc_cid", "mc_eid", "si",
+];
+const TRACKING_QUERY_PARAM_PREFIXES: &[&str] = &["utm_"];
+const HOST_TRACKING_QUERY_PARAMS: &[(&str, &[&str])] =
+    &[("x.com", &["s"]), ("twitter.com", &["s"])];
+
+fn strip_tracking_params(url: &url::Url) -> url::Url {
+    let host = url.host_str().unwrap_or_default().to_lowercase();
+    let mut stripped = url.clone();
+    let kept: Vec<(String, String)> = stripped
+        .query_pairs()
+        .filter(|(key, _)| {
+            let key = key.to_lowercase();
+            if TRACKING_QUERY_PARAMS.contains(&key.as_str())
+                || TRACKING_QUERY_PARAM_PREFIXES
+                    .iter()
+                    .any(|prefix| key.starts_with(prefix))
+            {
+                return false;
+            }
+            !HOST_TRACKING_QUERY_PARAMS.iter().any(|(pattern, params)| {
+                (host == *pattern || host.ends_with(&format!(".{pattern}")))
+                    && params.contains(&key.as_str())
+            })
+        })
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    if kept.is_empty() {
+        stripped.set_query(None);
+    } else {
+        stripped.query_pairs_mut().clear().extend_pairs(kept);
+    }
+    stripped
+}
+
 pub fn transform_to_host(parsed: &url::Url, host: &str) -> Option<String> {
-    let mut new_url = parsed.clone();
+    let mut new_url = strip_tracking_params(parsed);
     new_url.set_host(Some(host)).ok()?;
     Some(new_url.to_string())
 }
@@ -235,7 +271,7 @@ mod tests {
     fn test_transform_instagram() {
         assert_eq!(
             get_transformed_url("https://www.instagram.com/p/ABC123/"),
-            Some("https://kkinstagram.com/p/ABC123/".to_string())
+            Some("https://d.oginstagram.com/p/ABC123/".to_string())
         );
     }
 
@@ -243,7 +279,7 @@ mod tests {
     fn test_transform_instagram_short() {
         assert_eq!(
             get_transformed_url("https://instagr.am/p/ABC123/"),
-            Some("https://kkinstagram.com/p/ABC123/".to_string())
+            Some("https://d.oginstagram.com/p/ABC123/".to_string())
         );
     }
 
@@ -332,6 +368,58 @@ mod tests {
     fn test_transform_invalid_url() {
         assert_eq!(get_transformed_url("not-a-url"), None);
         assert_eq!(get_transformed_url(""), None);
+    }
+
+    #[test]
+    fn test_get_mirrors_instagram_order() {
+        let (_, mirrors) = get_mirrors("https://www.instagram.com/p/ABC123/").unwrap();
+        assert_eq!(
+            mirrors,
+            &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"]
+        );
+    }
+
+    #[test]
+    fn test_transform_strips_instagram_share_ids() {
+        assert_eq!(
+            get_transformed_url("https://www.instagram.com/reel/ABC/?igsh=abc&igshid=xyz"),
+            Some("https://d.oginstagram.com/reel/ABC/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_strips_tracking_keeps_other_params() {
+        assert_eq!(
+            get_transformed_url(
+                "https://www.instagram.com/p/ABC/?igsh=x&utm_source=ig&img_index=2"
+            ),
+            Some("https://d.oginstagram.com/p/ABC/?img_index=2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_strips_x_share_param() {
+        assert_eq!(
+            get_transformed_url("https://x.com/user/status/123?s=20"),
+            Some("https://fxtwitter.com/user/status/123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_strips_youtube_si() {
+        assert_eq!(
+            get_transformed_url("https://youtu.be/abc?si=xyz"),
+            Some("https://koutube.com/abc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_keeps_s_param_on_unrelated_host() {
+        let parsed = url::Url::parse("https://reddit.com/search/?s=term").unwrap();
+        assert_eq!(
+            transform_to_host(&parsed, "vxreddit.com"),
+            Some("https://vxreddit.com/search/?s=term".to_string())
+        );
     }
 
     #[test]
