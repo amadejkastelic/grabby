@@ -16,6 +16,7 @@ A Discord bot that downloads and embeds media from URLs directly into Discord me
 - **File Size Limits**: Enforces Discord's 25MB file size limit with user feedback
 - **Auto-Resize**: Automatically resizes oversized media files using ffmpeg to fit Discord's 25MB limit
 - **Domain Filtering**: Per-server whitelist (`allowed_domains`) and blacklist (`disabled_domains`) gate which domains are auto-embedded (the `/embed` command is unaffected). Empty whitelist = allow all; blacklist wins when a domain is in both.
+- **Instagram URL Normalization**: Any URL whose path matches Instagram's media shape (`/p|reel|tv/<shortcode>`) is canonicalized to `instagram.com` with query params dropped (except `img_index`) before domain filtering, transform, or download — so randomized share-tracking params and mirror hosts like `d.oginstagram.com` are handled without enumerating each one.
 - **Transform-Only Mode**: Per-server `transform_only` flag that skips downloading entirely and instead posts transformed URLs (e.g. `x.com` → `fxtwitter.com`) so Discord renders the native embed. URLs with no transform mapping are ignored. Applies to auto-embed channels and the `/embed` command.
 
 ### User Experience

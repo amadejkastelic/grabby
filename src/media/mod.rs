@@ -15,15 +15,11 @@ use gallery_dl::GalleryDlDownloader;
 use tracing::{info, warn};
 use ytdlp::YtDlpDownloader;
 
+const INSTAGRAM_MIRRORS: &[&str] = &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"];
+
 const URL_TRANSFORMS: &[(&str, &[&str])] = &[
-    (
-        "instagram.com",
-        &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"],
-    ),
-    (
-        "instagr.am",
-        &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"],
-    ),
+    ("instagram.com", INSTAGRAM_MIRRORS),
+    ("instagr.am", INSTAGRAM_MIRRORS),
     (
         "tiktok.com",
         &["kktiktok.com", "vxtiktok.com", "tnktok.com"],
@@ -48,10 +44,46 @@ pub fn get_mirrors(url: &str) -> Option<(url::Url, &'static [&'static str])> {
     let host = parsed.host_str()?.to_lowercase();
     for (pattern, mirrors) in URL_TRANSFORMS {
         if host == *pattern || host.ends_with(&format!(".{pattern}")) {
-            return Some((parsed, mirrors));
+            let normalized = normalize_instagram(&parsed).unwrap_or(parsed);
+            return Some((normalized, mirrors));
         }
     }
-    None
+    normalize_instagram(&parsed).map(|normalized| (normalized, INSTAGRAM_MIRRORS))
+}
+
+fn is_instagram_shortcode(segment: &str) -> bool {
+    (5..=12).contains(&segment.len())
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn normalize_instagram(url: &url::Url) -> Option<url::Url> {
+    let mut segments = url.path().trim_matches('/').split('/');
+    let kind = segments.next()?;
+    let shortcode = segments.next()?;
+    if !matches!(kind, "p" | "reel" | "tv") || !is_instagram_shortcode(shortcode) {
+        return None;
+    }
+    let mut normalized =
+        url::Url::parse(&format!("https://www.instagram.com/{kind}/{shortcode}/")).ok()?;
+    if let Some((_, value)) = url
+        .query_pairs()
+        .find(|(key, _)| key.eq_ignore_ascii_case("img_index"))
+    {
+        normalized
+            .query_pairs_mut()
+            .append_pair("img_index", &value);
+    }
+    Some(normalized)
+}
+
+pub fn normalize_url(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| normalize_instagram(&parsed))
+        .map(|normalized| normalized.to_string())
+        .unwrap_or_else(|| url.to_string())
 }
 
 const TRACKING_QUERY_PARAMS: &[&str] = &[
@@ -384,6 +416,57 @@ mod tests {
         assert_eq!(
             get_transformed_url("https://www.instagram.com/reel/ABC/?igsh=abc&igshid=xyz"),
             Some("https://d.oginstagram.com/reel/ABC/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_normalize_url_drops_random_share_params() {
+        assert_eq!(
+            normalize_url("https://www.instagram.com/reel/De3n1qsIN7k/?obrf=YmVpeHY5cDZ6cmwy"),
+            "https://www.instagram.com/reel/De3n1qsIN7k/"
+        );
+        assert_eq!(
+            normalize_url("https://d.oginstagram.com/p/DetS_ufDpap/?srtk=MXY5OGJ2c3RjZXZ6bQ%3D%3D"),
+            "https://www.instagram.com/p/DetS_ufDpap/"
+        );
+        assert_eq!(
+            normalize_url("https://kkinstagram.com/p/DemdElRIkZ1/?vrfl=MWhmeGlpaHByejViNA%3D%3D"),
+            "https://www.instagram.com/p/DemdElRIkZ1/"
+        );
+    }
+
+    #[test]
+    fn test_normalize_url_keeps_img_index() {
+        assert_eq!(
+            normalize_url("https://www.instagram.com/p/DetS_ufDpap/?srtk=x&img_index=2"),
+            "https://www.instagram.com/p/DetS_ufDpap/?img_index=2"
+        );
+    }
+
+    #[test]
+    fn test_normalize_url_ignores_non_media_paths() {
+        assert_eq!(
+            normalize_url("https://www.instagram.com/someuser/"),
+            "https://www.instagram.com/someuser/"
+        );
+        assert_eq!(
+            normalize_url("https://www.instagram.com/explore/tags/cats/"),
+            "https://www.instagram.com/explore/tags/cats/"
+        );
+        assert_eq!(
+            normalize_url("https://www.youtube.com/watch?v=abc"),
+            "https://www.youtube.com/watch?v=abc"
+        );
+        assert_eq!(normalize_url("not-a-url"), "not-a-url");
+    }
+
+    #[test]
+    fn test_transform_mirror_host_url() {
+        assert_eq!(
+            get_transformed_url(
+                "https://d.oginstagram.com/reel/DcWL5fKESEY/?dlrf=cnZ2bjU1ZHJtdHBl"
+            ),
+            Some("https://d.oginstagram.com/reel/DcWL5fKESEY/".to_string())
         );
     }
 

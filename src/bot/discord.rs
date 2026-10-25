@@ -604,7 +604,8 @@ impl DiscordBot {
         interaction: &Interaction,
         data: &CommandData,
     ) -> Result<()> {
-        let options = EmbedCommandOptions::from_command_data(data);
+        let mut options = EmbedCommandOptions::from_command_data(data);
+        options.url = crate::media::normalize_url(&options.url);
 
         if options.url.is_empty() {
             self.respond_to_interaction(interaction, "Please provide a valid URL.")
@@ -1130,7 +1131,7 @@ impl DiscordBot {
             .split_whitespace()
             .filter_map(|word| {
                 if word.starts_with("http://") || word.starts_with("https://") {
-                    Some(word.to_string())
+                    Some(crate::media::normalize_url(word))
                 } else {
                     None
                 }
