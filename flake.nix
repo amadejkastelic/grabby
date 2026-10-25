@@ -61,11 +61,25 @@
           src = ./.;
           hooks = {
             nixfmt.enable = true;
-            cargo-check.enable = true;
-            rustfmt.enable = true;
+            cargo-check = {
+              enable = true;
+              package = devToolchain;
+              entry = "env RUSTC=${devToolchain}/bin/rustc ${devToolchain}/bin/cargo check";
+            };
+            rustfmt = {
+              enable = true;
+              packageOverrides = {
+                cargo = devToolchain;
+                rustfmt = devToolchain;
+              };
+            };
             clippy = {
               enable = true;
               settings.denyWarnings = true;
+              packageOverrides = {
+                cargo = devToolchain;
+                clippy = devToolchain;
+              };
             };
           };
           settings.rust.check.cargoDeps = rustPlatform.importCargoLock {
