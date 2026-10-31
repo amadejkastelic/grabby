@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**.nix'
+      - 'flake.lock'
+      - '.github/workflows/checks.yaml'
   pull_request:
   workflow_dispatch:
 
@@ -22,3 +29,17 @@ jobs:
     needs: check
     uses: ./.github/workflows/build.yaml
     secrets: inherit
+
+  dispatch:
+    needs: build
+    if: github.repository == 'amadejkastelic/grabby'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger infra flake update
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/amadejkastelic/infra/actions/workflows/update-flake.yml/dispatches \
+            -f ref=main \
+            -f 'inputs[inputs]=grabby' \
+            -f 'inputs[sha]='"${{ github.sha }}"
