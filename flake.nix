@@ -61,6 +61,7 @@
           src = ./.;
           hooks = {
             nixfmt.enable = true;
+            actionlint.enable = true;
             cargo-check = {
               enable = true;
               package = devToolchain;
