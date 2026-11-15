@@ -12,12 +12,17 @@ rustPlatform.buildRustPackage {
   src = pkgs.lib.cleanSource ../.;
   doCheck = true;
 
-  nativeBuildInputs = [ pkgs.makeWrapper ];
+  nativeBuildInputs = with pkgs; [
+    makeWrapper
+    pkg-config
+  ];
 
   buildInputs = with pkgs; [
+    aws-lc
     yt-dlp
     gallery-dl
     ffmpeg
+    zstd
   ];
 
   postFixup = ''

@@ -55,6 +55,12 @@
           "rustfmt"
         ];
 
+        rustSysDeps = with pkgs; [
+          aws-lc
+          pkg-config
+          zstd
+        ];
+
         grabbyPkg = pkgs.callPackage ./nix/package.nix { inherit rustPlatform; };
 
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
@@ -66,6 +72,7 @@
               enable = true;
               package = devToolchain;
               entry = "env RUSTC=${devToolchain}/bin/rustc ${devToolchain}/bin/cargo check";
+              extraPackages = rustSysDeps;
             };
             rustfmt = {
               enable = true;
@@ -77,6 +84,7 @@
             clippy = {
               enable = true;
               settings.denyWarnings = true;
+              extraPackages = rustSysDeps;
               packageOverrides = {
                 cargo = devToolchain;
                 clippy = devToolchain;
