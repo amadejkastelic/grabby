@@ -15,7 +15,12 @@ use gallery_dl::GalleryDlDownloader;
 use tracing::{info, warn};
 use ytdlp::YtDlpDownloader;
 
-const INSTAGRAM_MIRRORS: &[&str] = &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"];
+const INSTAGRAM_MIRRORS: &[&str] = &[
+    "d.oginstagram.com",
+    "kkinstagram.com",
+    "uuinstagram.com",
+    "kirkstagram.com",
+];
 
 const URL_TRANSFORMS: &[(&str, &[&str])] = &[
     ("instagram.com", INSTAGRAM_MIRRORS),
@@ -407,7 +412,12 @@ mod tests {
         let (_, mirrors) = get_mirrors("https://www.instagram.com/p/ABC123/").unwrap();
         assert_eq!(
             mirrors,
-            &["d.oginstagram.com", "kkinstagram.com", "uuinstagram.com"]
+            &[
+                "d.oginstagram.com",
+                "kkinstagram.com",
+                "uuinstagram.com",
+                "kirkstagram.com",
+            ]
         );
     }
 
